@@ -1,0 +1,117 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Arial', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.container {
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 15px;
+    padding: 40px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    max-width: 900px;
+    width: 100%;
+}
+
+h1 {
+    text-align: center;
+    color: #00ff88;
+    font-size: 48px;
+    margin-bottom: 20px;
+    text-shadow: 0 0 10px #00ff88;
+}
+
+.scoreboard {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 30px;
+    gap: 20px;
+}
+
+.score {
+    flex: 1;
+    text-align: center;
+    background: rgba(0, 255, 136, 0.1);
+    padding: 20px;
+    border-radius: 10px;
+    border: 2px solid #00ff88;
+}
+
+.score h2 {
+    color: #00ff88;
+    font-size: 18px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.score p {
+    color: #ffffff;
+    font-size: 48px;
+    font-weight: bold;
+}
+
+#gameCanvas {
+    display: block;
+    margin: 0 auto 30px;
+    background: #000;
+    border: 3px solid #00ff88;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.instructions {
+    text-align: center;
+    color: #00ff88;
+    background: rgba(0, 255, 136, 0.05);
+    padding: 20px;
+    border-radius: 10px;
+    border-left: 4px solid #00ff88;
+}
+
+.instructions p {
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+.instructions strong {
+    color: #ffffff;
+    font-weight: bold;
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 20px;
+    }
+
+    h1 {
+        font-size: 36px;
+    }
+
+    #gameCanvas {
+        width: 100%;
+        height: auto;
+    }
+
+    .score h2 {
+        font-size: 16px;
+    }
+
+    .score p {
+        font-size: 36px;
+    }
+
+    .instructions p {
+        font-size: 12px;
+    }
+}
