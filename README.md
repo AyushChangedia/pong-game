@@ -1,3 +1,3 @@
 # pong-game
 Click on this Link to Play ~~ https://ayushchangedia.github.io/pong-game/
-A fun game to play with Comp...
+
