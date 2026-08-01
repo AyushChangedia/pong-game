@@ -68,7 +68,10 @@ document.addEventListener('keyup', (e) => {
 
 document.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
-    mouseY = e.clientY - rect.top;
+    // Below 768px the stylesheet sets the canvas to width:100%/height:auto, so
+    // its rendered height stops matching its 400px drawing buffer. Convert the
+    // pointer into buffer coordinates or the paddle lags the cursor on mobile.
+    mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
     usingMouse = true;
 });
 
