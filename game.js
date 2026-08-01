@@ -43,6 +43,9 @@ const score = {
     computer: 0
 };
 
+// Set once someone reaches WIN_SCORE; freezes simulation but not rendering.
+let gameOver = false;
+
 // Input handling
 const keys = {};
 let mouseY = canvas.height / 2;
@@ -162,6 +165,10 @@ function updateBall() {
         resetBall();
     }
 
+    if (score.player >= WIN_SCORE || score.computer >= WIN_SCORE) {
+        gameOver = true;
+    }
+
     // Cap ball speed
     const maxSpeed = 8;
     const speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
@@ -255,9 +262,11 @@ function draw() {
 
 // Game loop
 function gameLoop() {
-    updatePlayerPaddle();
-    updateAIPaddle();
-    updateBall();
+    if (!gameOver) {
+        updatePlayerPaddle();
+        updateAIPaddle();
+        updateBall();
+    }
     draw();
     requestAnimationFrame(gameLoop);
 }
