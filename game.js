@@ -58,6 +58,9 @@ let usingMouse = true;
 document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // Otherwise the browser scrolls the page while you are playing, which
+        // drags the canvas out of view on short windows.
+        e.preventDefault();
         usingMouse = false;
     }
 });
