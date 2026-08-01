@@ -43,12 +43,33 @@ const score = {
     computer: 0
 };
 
+// Set once someone reaches WIN_SCORE; freezes simulation but not rendering.
+let gameOver = false;
+
 // Input handling
 const keys = {};
 let mouseY = canvas.height / 2;
 
+// Whichever device was used last owns the paddle. Without this the mouse
+// block below runs every frame and drags the paddle straight back to the
+// pointer, so the arrow keys appear to do nothing.
+let usingMouse = true;
+
 document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
+
+    if (gameOver && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        resetGame();
+        return;
+    }
+
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // Otherwise the browser scrolls the page while you are playing, which
+        // drags the canvas out of view on short windows.
+        e.preventDefault();
+        usingMouse = false;
+    }
 });
 
 document.addEventListener('keyup', (e) => {
@@ -57,7 +78,11 @@ document.addEventListener('keyup', (e) => {
 
 document.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
-    mouseY = e.clientY - rect.top;
+    // Below 768px the stylesheet sets the canvas to width:100%/height:auto, so
+    // its rendered height stops matching its 400px drawing buffer. Convert the
+    // pointer into buffer coordinates or the paddle lags the cursor on mobile.
+    mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+    usingMouse = true;
 });
 
 // Update player paddle position
@@ -70,7 +95,11 @@ function updatePlayerPaddle() {
         paddles.left.y = Math.min(canvas.height - PADDLE_HEIGHT, paddles.left.y + PADDLE_SPEED);
     }
 
-    // Mouse control
+    // Mouse control — skipped while the keyboard is driving
+    if (!usingMouse) {
+        return;
+    }
+
     const targetY = mouseY - PADDLE_HEIGHT / 2;
     const currentDistance = Math.abs(paddles.left.y - targetY);
     
@@ -149,6 +178,10 @@ function updateBall() {
         resetBall();
     }
 
+    if (score.player >= WIN_SCORE || score.computer >= WIN_SCORE) {
+        gameOver = true;
+    }
+
     // Cap ball speed
     const maxSpeed = 8;
     const speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
@@ -156,6 +189,16 @@ function updateBall() {
         ball.dx = (ball.dx / speed) * maxSpeed;
         ball.dy = (ball.dy / speed) * maxSpeed;
     }
+}
+
+// Reset the whole match back to its opening state
+function resetGame() {
+    score.player = 0;
+    score.computer = 0;
+    paddles.left.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
+    paddles.right.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
+    resetBall();
+    gameOver = false;
 }
 
 // Reset ball to center
@@ -225,7 +268,7 @@ function draw() {
         ctx.textAlign = 'center';
         ctx.fillText('YOU WIN!', canvas.width / 2, canvas.height / 2);
         ctx.font = '20px Arial';
-        ctx.fillText('Refresh to play again', canvas.width / 2, canvas.height / 2 + 50);
+        ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
         return;
     } else if (score.computer >= WIN_SCORE) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -235,16 +278,18 @@ function draw() {
         ctx.textAlign = 'center';
         ctx.fillText('GAME OVER!', canvas.width / 2, canvas.height / 2);
         ctx.font = '20px Arial';
-        ctx.fillText('Computer wins!', canvas.width / 2, canvas.height / 2 + 50);
+        ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
         return;
     }
 }
 
 // Game loop
 function gameLoop() {
-    updatePlayerPaddle();
-    updateAIPaddle();
-    updateBall();
+    if (!gameOver) {
+        updatePlayerPaddle();
+        updateAIPaddle();
+        updateBall();
+    }
     draw();
     requestAnimationFrame(gameLoop);
 }
