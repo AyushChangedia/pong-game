@@ -57,6 +57,13 @@ let usingMouse = true;
 
 document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
+
+    if (gameOver && (e.key === ' ' || e.key === 'Enter')) {
+        e.preventDefault();
+        resetGame();
+        return;
+    }
+
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         // Otherwise the browser scrolls the page while you are playing, which
         // drags the canvas out of view on short windows.
@@ -184,6 +191,16 @@ function updateBall() {
     }
 }
 
+// Reset the whole match back to its opening state
+function resetGame() {
+    score.player = 0;
+    score.computer = 0;
+    paddles.left.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
+    paddles.right.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
+    resetBall();
+    gameOver = false;
+}
+
 // Reset ball to center
 function resetBall() {
     ball.x = canvas.width / 2;
@@ -251,7 +268,7 @@ function draw() {
         ctx.textAlign = 'center';
         ctx.fillText('YOU WIN!', canvas.width / 2, canvas.height / 2);
         ctx.font = '20px Arial';
-        ctx.fillText('Refresh to play again', canvas.width / 2, canvas.height / 2 + 50);
+        ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
         return;
     } else if (score.computer >= WIN_SCORE) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -261,7 +278,7 @@ function draw() {
         ctx.textAlign = 'center';
         ctx.fillText('GAME OVER!', canvas.width / 2, canvas.height / 2);
         ctx.font = '20px Arial';
-        ctx.fillText('Computer wins!', canvas.width / 2, canvas.height / 2 + 50);
+        ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
         return;
     }
 }
