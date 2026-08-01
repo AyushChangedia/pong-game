@@ -47,8 +47,16 @@ const score = {
 const keys = {};
 let mouseY = canvas.height / 2;
 
+// Whichever device was used last owns the paddle. Without this the mouse
+// block below runs every frame and drags the paddle straight back to the
+// pointer, so the arrow keys appear to do nothing.
+let usingMouse = true;
+
 document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        usingMouse = false;
+    }
 });
 
 document.addEventListener('keyup', (e) => {
@@ -58,6 +66,7 @@ document.addEventListener('keyup', (e) => {
 document.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     mouseY = e.clientY - rect.top;
+    usingMouse = true;
 });
 
 // Update player paddle position
@@ -70,7 +79,11 @@ function updatePlayerPaddle() {
         paddles.left.y = Math.min(canvas.height - PADDLE_HEIGHT, paddles.left.y + PADDLE_SPEED);
     }
 
-    // Mouse control
+    // Mouse control — skipped while the keyboard is driving
+    if (!usingMouse) {
+        return;
+    }
+
     const targetY = mouseY - PADDLE_HEIGHT / 2;
     const currentDistance = Math.abs(paddles.left.y - targetY);
     
