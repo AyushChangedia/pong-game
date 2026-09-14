@@ -159,6 +159,38 @@ function updateAI(state) {
 }
 
 /**
+ * Move the player's paddle from an input reading.
+ *
+ * `input` is whatever the browser last knew: `{ up, down, pointerY, pointer }`.
+ * `pointer` says whether the pointer is the thing currently driving — without
+ * it the pointer branch runs every frame and drags the paddle straight back
+ * to where the mouse is resting, so the arrow keys appear to do nothing.
+ *
+ * Keys win over the pointer when both are given, because a key is a
+ * deliberate press and a resting pointer is not.
+ */
+function updatePlayer(state, input = {}) {
+  const paddle = state.paddles.left;
+  const field = state.field;
+
+  const up = Boolean(input.up);
+  const down = Boolean(input.down);
+
+  if (up || down) {
+    // Both at once cancel out and the paddle holds still. It does not fall
+    // through to the pointer — the player has their hands on the keys.
+    if (up !== down) paddle.y += up ? -RULES.paddleSpeed : RULES.paddleSpeed;
+    return clampPaddle(paddle, field);
+  }
+
+  if (input.pointer && Number.isFinite(input.pointerY)) {
+    return trackTowards(paddle, input.pointerY, RULES.paddleSpeed, field);
+  }
+
+  return clampPaddle(paddle, field);
+}
+
+/**
  * Advance one step: move the ball, bounce it, award a point if it left.
  * Returns 'player', 'computer' or null depending on who scored.
  */
@@ -210,6 +242,7 @@ const ENGINE = {
   resetMatch,
   trackTowards,
   updateAI,
+  updatePlayer,
   stepBall,
   winner,
 };
