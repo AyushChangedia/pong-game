@@ -58,14 +58,46 @@ document.addEventListener('keyup', (e) => {
   if (e.key === 'ArrowDown') input.down = false;
 });
 
-document.addEventListener('mousemove', (e) => {
+/**
+ * Take a client-space y and aim the paddle at it.
+ *
+ * Below 768px the stylesheet sets the canvas to width:100%/height:auto, so
+ * its rendered height stops matching its 400px drawing buffer. The pointer
+ * has to be converted into buffer coordinates or the paddle lags the finger
+ * by however much the canvas has been scaled.
+ */
+function aimAt(clientY) {
   const rect = canvas.getBoundingClientRect();
-  // Below 768px the stylesheet sets the canvas to width:100%/height:auto, so
-  // its rendered height stops matching its 400px drawing buffer. Convert the
-  // pointer into buffer coordinates or the paddle lags the cursor on mobile.
-  if (rect.height === 0) return;
-  input.pointerY = (e.clientY - rect.top) * (canvas.height / rect.height);
+  if (!rect.height) return;
+  input.pointerY = (clientY - rect.top) * (canvas.height / rect.height);
   input.pointer = true;
+}
+
+document.addEventListener('mousemove', (e) => aimAt(e.clientY));
+
+// Touch. The page is styled for phones, the instructions offer a mouse and
+// the arrow keys, and a phone has neither — so on the device the stylesheet
+// goes to the most trouble for, the paddle could not be moved at all.
+//
+// Non-passive, because the drag has to be stopped from scrolling the page
+// out from under the game. touchmove alone would leave a tap doing nothing
+// until the finger moved, so touchstart aims too.
+for (const type of ['touchstart', 'touchmove']) {
+  canvas.addEventListener(
+    type,
+    (e) => {
+      const touch = e.touches && e.touches[0];
+      if (!touch) return;
+      e.preventDefault();
+      aimAt(touch.clientY);
+    },
+    { passive: false },
+  );
+}
+
+// A tap anywhere restarts a finished match, since there is no space bar.
+canvas.addEventListener('touchend', () => {
+  if (state.gameOver) resetMatch(state);
 });
 
 /* -------------------------------------------------------------- drawing -- */

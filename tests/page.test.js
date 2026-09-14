@@ -36,11 +36,17 @@ function loadPage() {
     },
   );
 
+  const listeners = {};
+  const listen = (prefix) => (type, fn, options) => {
+    (listeners[prefix + type] || (listeners[prefix + type] = [])).push({ fn, options });
+  };
+
   const canvas = {
     width: 800,
     height: 400,
     getContext: () => ctx,
     getBoundingClientRect: () => ({ top: 0, left: 0, height: 400, width: 800 }),
+    addEventListener: listen('canvas:'),
   };
 
   const elements = {
@@ -49,16 +55,13 @@ function loadPage() {
     computerScore: { textContent: '' },
   };
 
-  const listeners = {};
   let pending = null;
 
   const sandbox = {
     window: {},
     document: {
       getElementById: (id) => elements[id],
-      addEventListener: (type, fn) => {
-        (listeners[type] || (listeners[type] = [])).push(fn);
-      },
+      addEventListener: listen(''),
     },
     requestAnimationFrame: (fn) => {
       pending = fn;
@@ -93,8 +96,21 @@ function loadPage() {
       return page;
     },
     fire(type, event) {
-      for (const fn of listeners[type] || []) fn(event);
+      for (const { fn } of listeners[type] || []) fn(event);
       return page;
+    },
+    /** A touch event on the canvas, with the default-prevention recorded. */
+    touch(type, clientY) {
+      const prevented = [];
+      const event = {
+        touches: clientY === undefined ? [] : [{ clientY }],
+        preventDefault: () => prevented.push(true),
+      };
+      for (const { fn } of listeners[`canvas:${type}`] || []) fn(event);
+      return prevented.length > 0;
+    },
+    registrations(type) {
+      return listeners[type] || [];
     },
   };
 
@@ -195,6 +211,55 @@ test('a pointer move is accepted in buffer coordinates', () => {
 test('space restarts a finished match', () => {
   const page = loadPage().frames(20_000);
   page.fire('keydown', press(' '));
+  page.frames(1);
+  assert.equal(page.elements.playerScore.textContent, 0);
+  assert.equal(page.elements.computerScore.textContent, 0);
+});
+
+/* ------------------------------------------------------------- the touch -- */
+
+test('dragging a finger down the board moves the paddle', () => {
+  const page = loadPage().frames(1);
+  const before = playerPaddleY(page);
+  page.touch('touchmove', 390);
+  page.frames(30);
+  assert.ok(playerPaddleY(page) > before, 'the paddle ignored the touch');
+});
+
+test('a tap aims the paddle without waiting for the finger to move', () => {
+  // touchmove alone leaves the first tap doing nothing at all.
+  const page = loadPage().frames(1);
+  const before = playerPaddleY(page);
+  page.touch('touchstart', 390);
+  page.frames(30);
+  assert.ok(playerPaddleY(page) > before, 'touchstart did not aim');
+});
+
+test('a drag on the board does not scroll the page out from under it', () => {
+  const page = loadPage().frames(1);
+  assert.equal(page.touch('touchmove', 200), true, 'the default was not prevented');
+
+  // Which only works if the listener asked not to be passive.
+  for (const type of ['canvas:touchstart', 'canvas:touchmove']) {
+    const [registration] = page.registrations(type);
+    assert.ok(registration, `nothing listens for ${type}`);
+    assert.equal(registration.options && registration.options.passive, false, type);
+  }
+});
+
+test('a touch with no finger in it is ignored rather than followed', () => {
+  const page = loadPage().frames(1);
+  const before = playerPaddleY(page);
+  assert.doesNotThrow(() => page.touch('touchmove', undefined));
+  page.frames(30);
+  assert.equal(playerPaddleY(page), before);
+});
+
+test('tapping the board restarts a finished match', () => {
+  // There is no space bar on a phone, so without this the game ends and
+  // cannot be started again.
+  const page = loadPage().frames(20_000);
+  page.touch('touchend');
   page.frames(1);
   assert.equal(page.elements.playerScore.textContent, 0);
   assert.equal(page.elements.computerScore.textContent, 0);
