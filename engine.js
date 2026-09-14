@@ -60,7 +60,15 @@ function createState(field = FIELD) {
   };
 }
 
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+/**
+ * Hold a value between two bounds, with the low bound winning if they cross.
+ *
+ * They cross when the thing is bigger than the space it is being held in — a
+ * paddle taller than the field. Math.min(high, …) last would win that
+ * argument and hand back a negative y, which draws the paddle off the top of
+ * the canvas entirely. Clamped to the low bound it at least starts on screen.
+ */
+const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
 /** Keep a paddle on the field whatever moved it. */
 function clampPaddle(paddle, field) {
