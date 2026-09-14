@@ -1,0 +1,40 @@
+# CI for Pong.
+#
+# No dependencies and no build step — the whole project is three files a
+# browser loads directly — so this is one thing: run the suite.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # package.json hands `node --test` a glob, which older runtimes reject
+        # outright, so 22 is the floor rather than a preference.
+        node: ['22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          # No cache: there is no lockfile and nothing to install.
+
+      - run: npm test
