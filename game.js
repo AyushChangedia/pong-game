@@ -171,6 +171,27 @@ function draw() {
 let lastFrame = null;
 let carry = 0;
 
+/**
+ * Let go of every key, and forget how long it has been since the last frame.
+ *
+ * Both halves matter when the game loses focus. A keyup that happens while
+ * another window is in front is delivered to that window, so the arrow key
+ * you were holding is still held as far as this page knows, and coming back
+ * finds the paddle sliding into a wall on its own. And the clock has been
+ * running the whole time it was away: the first frame back carries the
+ * entire absence, which the step cap would then spend on catch-up nobody
+ * asked for.
+ */
+function standDown() {
+  input.up = false;
+  input.down = false;
+  lastFrame = null;
+  carry = 0;
+}
+
+document.addEventListener('visibilitychange', standDown);
+window.addEventListener('blur', standDown);
+
 function gameLoop(now) {
   requestAnimationFrame(gameLoop);
 

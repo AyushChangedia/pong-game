@@ -58,7 +58,7 @@ function loadPage() {
   let pending = null;
 
   const sandbox = {
-    window: {},
+    window: { addEventListener: listen('window:') },
     document: {
       getElementById: (id) => elements[id],
       addEventListener: listen(''),
@@ -112,6 +112,11 @@ function loadPage() {
     registrations(type) {
       return listeners[type] || [];
     },
+    /** Run `count` frames as if the clock had jumped by `gapMs` first. */
+    gap(gapMs, count = 1) {
+      clock += gapMs;
+      return page.frames(count);
+    },
   };
 
   return page;
@@ -139,9 +144,12 @@ test('index.html loads the engine before the game that reads it', () => {
 });
 
 test('only the engine is published to the window', () => {
+  // Everything else the two files declare stays inside their closures, which
+  // is what keeps them from colliding in the first place.
   const { sandbox } = loadPage();
   assert.equal(typeof sandbox.window.ENGINE, 'object');
-  assert.deepEqual(Object.keys(sandbox.window), ['ENGINE']);
+  const added = Object.keys(sandbox.window).filter((key) => key !== 'addEventListener');
+  assert.deepEqual(added, ['ENGINE']);
 });
 
 /* ------------------------------------------------------------- the loop -- */
@@ -214,6 +222,43 @@ test('space restarts a finished match', () => {
   page.frames(1);
   assert.equal(page.elements.playerScore.textContent, 0);
   assert.equal(page.elements.computerScore.textContent, 0);
+});
+
+/* ---------------------------------------------------- losing the window -- */
+
+test('a key held when the window loses focus is let go of', () => {
+  // The keyup arrives at whatever window is in front, not this one, so the
+  // arrow key stays held here. Coming back used to find the paddle sliding
+  // into a wall on its own with nobody touching anything.
+  const page = loadPage().frames(1);
+  page.fire('keydown', press('ArrowUp'));
+  page.frames(20);
+  page.fire('window:blur', {});
+
+  const parked = playerPaddleY(page);
+  page.frames(60);
+  assert.equal(playerPaddleY(page), parked, 'the paddle kept moving after focus was lost');
+});
+
+test('the same is true when the tab is hidden rather than unfocused', () => {
+  const page = loadPage().frames(1);
+  page.fire('keydown', press('ArrowDown'));
+  page.frames(20);
+  page.fire('visibilitychange', {});
+
+  const parked = playerPaddleY(page);
+  page.frames(60);
+  assert.equal(playerPaddleY(page), parked);
+});
+
+test('time spent away is not played out on the first frame back', () => {
+  const page = loadPage().frames(60);
+  const ballAfter = () => page.drawn.filter(([key]) => key === 'arc').pop()[1][0];
+
+  page.fire('visibilitychange', {});
+  const before = ballAfter();
+  page.gap(30_000, 1);
+  assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
 });
 
 /* ------------------------------------------------------------- the touch -- */
