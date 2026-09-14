@@ -11,8 +11,15 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-const { createState, resetMatch, updateAI, updatePlayer, stepBall, winner } =
-  window.ENGINE;
+const {
+  createState,
+  resetMatch,
+  updateAI,
+  updatePlayer,
+  planSteps,
+  stepBall,
+  winner,
+} = window.ENGINE;
 
 const state = createState({ width: canvas.width, height: canvas.height });
 
@@ -125,15 +132,31 @@ function draw() {
 
 /* ----------------------------------------------------------------- loop -- */
 
-function gameLoop() {
-  if (!state.gameOver) {
-    updatePlayer(state, input);
-    updateAI(state);
-    stepBall(state);
-  }
-  draw();
+// The clock the simulation runs on, which is not the clock the screen runs
+// on. A frame is worth however many fixed steps have come due since the last
+// one, so a 144Hz display plays the same game as a 60Hz one rather than the
+// same game at nearly two and a half times the speed.
+let lastFrame = null;
+let carry = 0;
+
+function gameLoop(now) {
   requestAnimationFrame(gameLoop);
+
+  const elapsed = lastFrame === null ? 0 : now - lastFrame;
+  lastFrame = now;
+
+  if (!state.gameOver) {
+    const plan = planSteps(elapsed, carry);
+    carry = plan.carry;
+    for (let i = 0; i < plan.steps; i += 1) {
+      updatePlayer(state, input);
+      updateAI(state);
+      stepBall(state);
+    }
+  }
+
+  draw();
 }
 
-gameLoop();
+requestAnimationFrame(gameLoop);
 })();

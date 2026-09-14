@@ -197,6 +197,47 @@
     return clampPaddle(paddle, field);
   }
 
+  const TIMING = {
+    /** One simulation step is one sixtieth of a second, always. */
+    stepMs: 1000 / 60,
+    /**
+     * The most steps one frame may run. A tab left in the background gets no
+     * frames at all, then one with the whole gap in it; without a cap the
+     * catch-up teleports the ball across the field and through a paddle.
+     */
+    maxStepsPerFrame: 5,
+  };
+
+  /**
+   * How many fixed steps this frame is worth, and what time is left over.
+   *
+   * The loop used to run exactly one step per animation frame, which ties the
+   * speed of the game to the refresh rate of the screen: the same code is a
+   * gentle rally at 60Hz and unplayable at 144Hz, and neither is wrong on its
+   * own terms. Counting milliseconds instead means one speed everywhere.
+   *
+   * @param {number} elapsedMs time since the last frame
+   * @param {number} carryMs milliseconds left over from that frame
+   * @returns {{steps: number, carry: number}}
+   */
+  function planSteps(elapsedMs, carryMs = 0) {
+    const carried = Number.isFinite(carryMs) && carryMs > 0 ? carryMs : 0;
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+      return { steps: 0, carry: carried };
+    }
+
+    const budget = carried + elapsedMs;
+    const wanted = Math.floor(budget / TIMING.stepMs);
+
+    if (wanted > TIMING.maxStepsPerFrame) {
+      // Past the cap the surplus is thrown away rather than owed. Carrying it
+      // would only make the next frame late as well, forever.
+      return { steps: TIMING.maxStepsPerFrame, carry: 0 };
+    }
+
+    return { steps: wanted, carry: budget - wanted * TIMING.stepMs };
+  }
+
   /**
    * Advance one step: move the ball, bounce it, award a point if it left.
    * Returns 'player', 'computer' or null depending on who scored.
@@ -239,6 +280,7 @@
   const ENGINE = {
     FIELD,
     RULES,
+    TIMING,
     createState,
     clamp,
     clampPaddle,
@@ -250,6 +292,7 @@
     trackTowards,
     updateAI,
     updatePlayer,
+    planSteps,
     stepBall,
     winner,
   };
