@@ -1,298 +1,215 @@
-// Canvas setup
+/**
+ * game.js — the browser half of Pong.
+ *
+ * The canvas, the key and pointer handlers, the drawing, the loop. Every rule
+ * about where the ball goes and who scores lives in engine.js, which has no
+ * DOM in it and can therefore be run and checked. This file is the part that
+ * only makes sense with a screen attached.
+ */
+
+(function () {
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Game variables
-const PADDLE_HEIGHT = 100;
-const PADDLE_WIDTH = 15;
-const BALL_SIZE = 10;
-const PADDLE_SPEED = 6;
-const AI_SPEED = 5;
-const WIN_SCORE = 5;
+const {
+  createState,
+  resetMatch,
+  updateAI,
+  updatePlayer,
+  planSteps,
+  stepBall,
+  winner,
+} = window.ENGINE;
 
-// Paddle object
-const paddles = {
-    left: {
-        x: 10,
-        y: canvas.height / 2 - PADDLE_HEIGHT / 2,
-        width: PADDLE_WIDTH,
-        height: PADDLE_HEIGHT,
-        dy: 0
-    },
-    right: {
-        x: canvas.width - PADDLE_WIDTH - 10,
-        y: canvas.height / 2 - PADDLE_HEIGHT / 2,
-        width: PADDLE_WIDTH,
-        height: PADDLE_HEIGHT,
-        dy: 0
-    }
+const state = createState({ width: canvas.width, height: canvas.height });
+
+/* ---------------------------------------------------------------- input -- */
+
+// What the browser last knew. The engine reads this and nothing else.
+const input = {
+  up: false,
+  down: false,
+  pointerY: canvas.height / 2,
+  // Whichever device was used last owns the paddle. Without this the pointer
+  // drags the paddle back to the resting cursor every frame, and the arrow
+  // keys appear to do nothing.
+  pointer: true,
 };
-
-// Ball object
-const ball = {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
-    dx: 5,
-    dy: 5,
-    size: BALL_SIZE
-};
-
-// Score object
-const score = {
-    player: 0,
-    computer: 0
-};
-
-// Set once someone reaches WIN_SCORE; freezes simulation but not rendering.
-let gameOver = false;
-
-// Input handling
-const keys = {};
-let mouseY = canvas.height / 2;
-
-// Whichever device was used last owns the paddle. Without this the mouse
-// block below runs every frame and drags the paddle straight back to the
-// pointer, so the arrow keys appear to do nothing.
-let usingMouse = true;
 
 document.addEventListener('keydown', (e) => {
-    keys[e.key] = true;
+  if (state.gameOver && (e.key === ' ' || e.key === 'Enter')) {
+    e.preventDefault();
+    resetMatch(state);
+    return;
+  }
 
-    if (gameOver && (e.key === ' ' || e.key === 'Enter')) {
-        e.preventDefault();
-        resetGame();
-        return;
-    }
-
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        // Otherwise the browser scrolls the page while you are playing, which
-        // drags the canvas out of view on short windows.
-        e.preventDefault();
-        usingMouse = false;
-    }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    // Otherwise the browser scrolls the page while you are playing, which
+    // drags the canvas out of view on short windows.
+    e.preventDefault();
+    input.pointer = false;
+    if (e.key === 'ArrowUp') input.up = true;
+    else input.down = true;
+  }
 });
 
 document.addEventListener('keyup', (e) => {
-    keys[e.key] = false;
+  if (e.key === 'ArrowUp') input.up = false;
+  if (e.key === 'ArrowDown') input.down = false;
 });
 
-document.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    // Below 768px the stylesheet sets the canvas to width:100%/height:auto, so
-    // its rendered height stops matching its 400px drawing buffer. Convert the
-    // pointer into buffer coordinates or the paddle lags the cursor on mobile.
-    mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-    usingMouse = true;
+/**
+ * Take a client-space y and aim the paddle at it.
+ *
+ * Below 768px the stylesheet sets the canvas to width:100%/height:auto, so
+ * its rendered height stops matching its 400px drawing buffer. The pointer
+ * has to be converted into buffer coordinates or the paddle lags the finger
+ * by however much the canvas has been scaled.
+ */
+function aimAt(clientY) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.height) return;
+  input.pointerY = (clientY - rect.top) * (canvas.height / rect.height);
+  input.pointer = true;
+}
+
+document.addEventListener('mousemove', (e) => aimAt(e.clientY));
+
+// Touch. The page is styled for phones, the instructions offer a mouse and
+// the arrow keys, and a phone has neither — so on the device the stylesheet
+// goes to the most trouble for, the paddle could not be moved at all.
+//
+// Non-passive, because the drag has to be stopped from scrolling the page
+// out from under the game. touchmove alone would leave a tap doing nothing
+// until the finger moved, so touchstart aims too.
+for (const type of ['touchstart', 'touchmove']) {
+  canvas.addEventListener(
+    type,
+    (e) => {
+      const touch = e.touches && e.touches[0];
+      if (!touch) return;
+      e.preventDefault();
+      aimAt(touch.clientY);
+    },
+    { passive: false },
+  );
+}
+
+// A tap anywhere restarts a finished match, since there is no space bar.
+canvas.addEventListener('touchend', () => {
+  if (state.gameOver) resetMatch(state);
 });
 
-// Update player paddle position
-function updatePlayerPaddle() {
-    // Arrow keys control
-    if (keys['ArrowUp']) {
-        paddles.left.y = Math.max(0, paddles.left.y - PADDLE_SPEED);
-    }
-    if (keys['ArrowDown']) {
-        paddles.left.y = Math.min(canvas.height - PADDLE_HEIGHT, paddles.left.y + PADDLE_SPEED);
-    }
+/* -------------------------------------------------------------- drawing -- */
 
-    // Mouse control — skipped while the keyboard is driving
-    if (!usingMouse) {
-        return;
-    }
-
-    const targetY = mouseY - PADDLE_HEIGHT / 2;
-    const currentDistance = Math.abs(paddles.left.y - targetY);
-    
-    if (currentDistance > 5) {
-        if (paddles.left.y < targetY) {
-            paddles.left.y = Math.min(canvas.height - PADDLE_HEIGHT, paddles.left.y + PADDLE_SPEED);
-        } else {
-            paddles.left.y = Math.max(0, paddles.left.y - PADDLE_SPEED);
-        }
-    }
-}
-
-// Update AI paddle position
-function updateAIPaddle() {
-    const paddle = paddles.right;
-    const paddleCenter = paddle.y + PADDLE_HEIGHT / 2;
-
-    // AI tracks the ball
-    if (Math.abs(paddleCenter - ball.y) > 5) {
-        if (paddleCenter < ball.y) {
-            paddle.y = Math.min(canvas.height - PADDLE_HEIGHT, paddle.y + AI_SPEED);
-        } else {
-            paddle.y = Math.max(0, paddle.y - AI_SPEED);
-        }
-    }
-}
-
-// Check collision between ball and paddle
-function checkPaddleCollision(paddle) {
-    if (
-        ball.x - ball.size < paddle.x + paddle.width &&
-        ball.x + ball.size > paddle.x &&
-        ball.y - ball.size < paddle.y + paddle.height &&
-        ball.y + ball.size > paddle.y
-    ) {
-        // Collision detected
-        ball.dx *= -1;
-
-        // Add spin based on where ball hits paddle
-        const hitPos = (ball.y - (paddle.y + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
-        ball.dy += hitPos * 3;
-
-        // Ensure ball doesn't get stuck
-        if (paddle === paddles.left) {
-            ball.x = paddle.x + paddle.width + ball.size;
-        } else {
-            ball.x = paddle.x - ball.size;
-        }
-
-        return true;
-    }
-    return false;
-}
-
-// Update ball position
-function updateBall() {
-    ball.x += ball.dx;
-    ball.y += ball.dy;
-
-    // Wall collision (top and bottom)
-    if (ball.y - ball.size < 0 || ball.y + ball.size > canvas.height) {
-        ball.dy *= -1;
-        ball.y = Math.max(ball.size, Math.min(canvas.height - ball.size, ball.y));
-    }
-
-    // Paddle collision
-    checkPaddleCollision(paddles.left);
-    checkPaddleCollision(paddles.right);
-
-    // Scoring
-    if (ball.x - ball.size < 0) {
-        score.computer++;
-        resetBall();
-    } else if (ball.x + ball.size > canvas.width) {
-        score.player++;
-        resetBall();
-    }
-
-    if (score.player >= WIN_SCORE || score.computer >= WIN_SCORE) {
-        gameOver = true;
-    }
-
-    // Cap ball speed
-    const maxSpeed = 8;
-    const speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
-    if (speed > maxSpeed) {
-        ball.dx = (ball.dx / speed) * maxSpeed;
-        ball.dy = (ball.dy / speed) * maxSpeed;
-    }
-}
-
-// Reset the whole match back to its opening state
-function resetGame() {
-    score.player = 0;
-    score.computer = 0;
-    paddles.left.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
-    paddles.right.y = canvas.height / 2 - PADDLE_HEIGHT / 2;
-    resetBall();
-    gameOver = false;
-}
-
-// Reset ball to center
-function resetBall() {
-    ball.x = canvas.width / 2;
-    ball.y = canvas.height / 2;
-    ball.dx = (Math.random() > 0.5 ? 1 : -1) * 5;
-    ball.dy = (Math.random() - 0.5) * 5;
-}
-
-// Draw paddle
 function drawPaddle(paddle) {
-    ctx.fillStyle = '#00ff88';
-    ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(paddle.x, paddle.y, paddle.width, paddle.height);
+  ctx.fillStyle = '#00ff88';
+  ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(paddle.x, paddle.y, paddle.width, paddle.height);
 }
 
-// Draw ball
 function drawBall() {
-    ctx.fillStyle = '#ff006e';
-    ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.size, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+  ctx.fillStyle = '#ff006e';
+  ctx.beginPath();
+  ctx.arc(state.ball.x, state.ball.y, state.ball.size, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
-// Draw center line
 function drawCenterLine() {
-    ctx.strokeStyle = '#666666';
-    ctx.setLineDash([10, 10]);
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width / 2, 0);
-    ctx.lineTo(canvas.width / 2, canvas.height);
-    ctx.stroke();
-    ctx.setLineDash([]);
+  ctx.strokeStyle = '#666666';
+  ctx.setLineDash([10, 10]);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2, 0);
+  ctx.lineTo(canvas.width / 2, canvas.height);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
-// Draw game
+function drawResult(who) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = who === 'player' ? '#00ff88' : '#ff006e';
+  ctx.font = 'bold 48px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    who === 'player' ? 'YOU WIN!' : 'GAME OVER!',
+    canvas.width / 2,
+    canvas.height / 2,
+  );
+  ctx.font = '20px Arial';
+  ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
+}
+
 function draw() {
-    // Clear canvas
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw center line
-    drawCenterLine();
+  drawCenterLine();
+  drawPaddle(state.paddles.left);
+  drawPaddle(state.paddles.right);
+  drawBall();
 
-    // Draw paddles and ball
-    drawPaddle(paddles.left);
-    drawPaddle(paddles.right);
-    drawBall();
+  document.getElementById('playerScore').textContent = state.score.player;
+  document.getElementById('computerScore').textContent = state.score.computer;
 
-    // Update score display
-    document.getElementById('playerScore').textContent = score.player;
-    document.getElementById('computerScore').textContent = score.computer;
-
-    // Check for win condition
-    if (score.player >= WIN_SCORE) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#00ff88';
-        ctx.font = 'bold 48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('YOU WIN!', canvas.width / 2, canvas.height / 2);
-        ctx.font = '20px Arial';
-        ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
-        return;
-    } else if (score.computer >= WIN_SCORE) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ff006e';
-        ctx.font = 'bold 48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('GAME OVER!', canvas.width / 2, canvas.height / 2);
-        ctx.font = '20px Arial';
-        ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
-        return;
-    }
+  const result = winner(state);
+  if (result) drawResult(result);
 }
 
-// Game loop
-function gameLoop() {
-    if (!gameOver) {
-        updatePlayerPaddle();
-        updateAIPaddle();
-        updateBall();
-    }
-    draw();
-    requestAnimationFrame(gameLoop);
+/* ----------------------------------------------------------------- loop -- */
+
+// The clock the simulation runs on, which is not the clock the screen runs
+// on. A frame is worth however many fixed steps have come due since the last
+// one, so a 144Hz display plays the same game as a 60Hz one rather than the
+// same game at nearly two and a half times the speed.
+let lastFrame = null;
+let carry = 0;
+
+/**
+ * Let go of every key, and forget how long it has been since the last frame.
+ *
+ * Both halves matter when the game loses focus. A keyup that happens while
+ * another window is in front is delivered to that window, so the arrow key
+ * you were holding is still held as far as this page knows, and coming back
+ * finds the paddle sliding into a wall on its own. And the clock has been
+ * running the whole time it was away: the first frame back carries the
+ * entire absence, which the step cap would then spend on catch-up nobody
+ * asked for.
+ */
+function standDown() {
+  input.up = false;
+  input.down = false;
+  lastFrame = null;
+  carry = 0;
 }
 
-// Start game
-gameLoop();
+document.addEventListener('visibilitychange', standDown);
+window.addEventListener('blur', standDown);
+
+function gameLoop(now) {
+  requestAnimationFrame(gameLoop);
+
+  const elapsed = lastFrame === null ? 0 : now - lastFrame;
+  lastFrame = now;
+
+  if (!state.gameOver) {
+    const plan = planSteps(elapsed, carry);
+    carry = plan.carry;
+    for (let i = 0; i < plan.steps; i += 1) {
+      updatePlayer(state, input);
+      updateAI(state);
+      stepBall(state);
+    }
+  }
+
+  draw();
+}
+
+requestAnimationFrame(gameLoop);
+})();
