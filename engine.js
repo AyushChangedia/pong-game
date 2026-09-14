@@ -13,241 +13,249 @@
  * module in Node, so there is one copy rather than two that drift.
  */
 
-const FIELD = { width: 800, height: 400 };
+// Everything below is inside a closure. engine.js and game.js are both
+// plain <script> tags, which in a browser share one global lexical scope:
+// a top-level `function createState` here and a top-level `const
+// { createState } = window.ENGINE` there is a redeclaration, and the page
+// dies on a SyntaxError before a single frame is drawn. Only ENGINE
+// escapes.
+(function () {
+  const FIELD = { width: 800, height: 400 };
 
-const RULES = {
-  paddleHeight: 100,
-  paddleWidth: 15,
-  paddleInset: 10,
-  ballSize: 10,
-  paddleSpeed: 6,
-  aiSpeed: 5,
-  winScore: 5,
-  serveSpeed: 5,
-  maxSpeed: 8,
-  /** How much the contact point off-centre bends the bounce. */
-  spin: 3,
-  /** The dead zone that stops a paddle jittering around its target. */
-  deadZone: 5,
-};
-
-function createState(field = FIELD) {
-  return {
-    field: { ...field },
-    paddles: {
-      left: {
-        x: RULES.paddleInset,
-        y: field.height / 2 - RULES.paddleHeight / 2,
-        width: RULES.paddleWidth,
-        height: RULES.paddleHeight,
-      },
-      right: {
-        x: field.width - RULES.paddleWidth - RULES.paddleInset,
-        y: field.height / 2 - RULES.paddleHeight / 2,
-        width: RULES.paddleWidth,
-        height: RULES.paddleHeight,
-      },
-    },
-    ball: {
-      x: field.width / 2,
-      y: field.height / 2,
-      dx: RULES.serveSpeed,
-      dy: RULES.serveSpeed,
-      size: RULES.ballSize,
-    },
-    score: { player: 0, computer: 0 },
-    gameOver: false,
+  const RULES = {
+    paddleHeight: 100,
+    paddleWidth: 15,
+    paddleInset: 10,
+    ballSize: 10,
+    paddleSpeed: 6,
+    aiSpeed: 5,
+    winScore: 5,
+    serveSpeed: 5,
+    maxSpeed: 8,
+    /** How much the contact point off-centre bends the bounce. */
+    spin: 3,
+    /** The dead zone that stops a paddle jittering around its target. */
+    deadZone: 5,
   };
-}
 
-/**
- * Hold a value between two bounds, with the low bound winning if they cross.
- *
- * They cross when the thing is bigger than the space it is being held in — a
- * paddle taller than the field. Math.min(high, …) last would win that
- * argument and hand back a negative y, which draws the paddle off the top of
- * the canvas entirely. Clamped to the low bound it at least starts on screen.
- */
-const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-
-/** Keep a paddle on the field whatever moved it. */
-function clampPaddle(paddle, field) {
-  paddle.y = clamp(paddle.y, 0, field.height - paddle.height);
-  return paddle;
-}
-
-/** Do the ball and the paddle overlap right now? */
-function overlaps(ball, paddle) {
-  return (
-    ball.x - ball.size < paddle.x + paddle.width &&
-    ball.x + ball.size > paddle.x &&
-    ball.y - ball.size < paddle.y + paddle.height &&
-    ball.y + ball.size > paddle.y
-  );
-}
-
-/**
- * Bounce the ball off a paddle, if it is actually arriving at one.
- *
- * @param {'left'|'right'} side which paddle this is
- * @returns {boolean} whether a bounce happened
- */
-function bounceOffPaddle(state, side) {
-  const paddle = state.paddles[side];
-  const ball = state.ball;
-
-  if (!overlaps(ball, paddle)) return false;
-
-  ball.dx = Math.abs(ball.dx) * (side === 'left' ? 1 : -1);
-
-  // Where on the paddle it landed, from -1 at the top to +1 at the bottom.
-  const contact = (ball.y - (paddle.y + paddle.height / 2)) / (paddle.height / 2);
-  ball.dy += contact * RULES.spin;
-
-  // Push it clear so the next frame does not find them still overlapping.
-  ball.x =
-    side === 'left'
-      ? paddle.x + paddle.width + ball.size
-      : paddle.x - ball.size;
-
-  capSpeed(ball);
-  return true;
-}
-
-/** Hold the ball's total speed at or below the cap, keeping its direction. */
-function capSpeed(ball) {
-  const speed = Math.hypot(ball.dx, ball.dy);
-  if (speed > RULES.maxSpeed) {
-    ball.dx = (ball.dx / speed) * RULES.maxSpeed;
-    ball.dy = (ball.dy / speed) * RULES.maxSpeed;
+  function createState(field = FIELD) {
+    return {
+      field: { ...field },
+      paddles: {
+        left: {
+          x: RULES.paddleInset,
+          y: field.height / 2 - RULES.paddleHeight / 2,
+          width: RULES.paddleWidth,
+          height: RULES.paddleHeight,
+        },
+        right: {
+          x: field.width - RULES.paddleWidth - RULES.paddleInset,
+          y: field.height / 2 - RULES.paddleHeight / 2,
+          width: RULES.paddleWidth,
+          height: RULES.paddleHeight,
+        },
+      },
+      ball: {
+        x: field.width / 2,
+        y: field.height / 2,
+        dx: RULES.serveSpeed,
+        dy: RULES.serveSpeed,
+        size: RULES.ballSize,
+      },
+      score: { player: 0, computer: 0 },
+      gameOver: false,
+    };
   }
-  return ball;
-}
 
-/** Put the ball back in the middle, served towards a random side. */
-function serve(state, random = Math.random) {
-  const ball = state.ball;
-  ball.x = state.field.width / 2;
-  ball.y = state.field.height / 2;
-  ball.dx = (random() > 0.5 ? 1 : -1) * RULES.serveSpeed;
-  ball.dy = (random() - 0.5) * RULES.serveSpeed;
-  return state;
-}
+  /**
+   * Hold a value between two bounds, with the low bound winning if they cross.
+   *
+   * They cross when the thing is bigger than the space it is being held in — a
+   * paddle taller than the field. Math.min(high, …) last would win that
+   * argument and hand back a negative y, which draws the paddle off the top of
+   * the canvas entirely. Clamped to the low bound it at least starts on screen.
+   */
+  const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
-/** Back to nil-nil with everything centred. */
-function resetMatch(state, random = Math.random) {
-  state.score.player = 0;
-  state.score.computer = 0;
-  state.paddles.left.y = state.field.height / 2 - RULES.paddleHeight / 2;
-  state.paddles.right.y = state.field.height / 2 - RULES.paddleHeight / 2;
-  state.gameOver = false;
-  return serve(state, random);
-}
-
-/** Move a paddle towards a target, at its own speed, with a dead zone. */
-function trackTowards(paddle, targetCentre, speed, field) {
-  const centre = paddle.y + paddle.height / 2;
-  if (Math.abs(centre - targetCentre) > RULES.deadZone) {
-    paddle.y += centre < targetCentre ? speed : -speed;
+  /** Keep a paddle on the field whatever moved it. */
+  function clampPaddle(paddle, field) {
+    paddle.y = clamp(paddle.y, 0, field.height - paddle.height);
+    return paddle;
   }
-  return clampPaddle(paddle, field);
-}
 
-/** The computer follows the ball. */
-function updateAI(state) {
-  return trackTowards(state.paddles.right, state.ball.y, RULES.aiSpeed, state.field);
-}
+  /** Do the ball and the paddle overlap right now? */
+  function overlaps(ball, paddle) {
+    return (
+      ball.x - ball.size < paddle.x + paddle.width &&
+      ball.x + ball.size > paddle.x &&
+      ball.y - ball.size < paddle.y + paddle.height &&
+      ball.y + ball.size > paddle.y
+    );
+  }
 
-/**
- * Move the player's paddle from an input reading.
- *
- * `input` is whatever the browser last knew: `{ up, down, pointerY, pointer }`.
- * `pointer` says whether the pointer is the thing currently driving — without
- * it the pointer branch runs every frame and drags the paddle straight back
- * to where the mouse is resting, so the arrow keys appear to do nothing.
- *
- * Keys win over the pointer when both are given, because a key is a
- * deliberate press and a resting pointer is not.
- */
-function updatePlayer(state, input = {}) {
-  const paddle = state.paddles.left;
-  const field = state.field;
+  /**
+   * Bounce the ball off a paddle, if it is actually arriving at one.
+   *
+   * @param {'left'|'right'} side which paddle this is
+   * @returns {boolean} whether a bounce happened
+   */
+  function bounceOffPaddle(state, side) {
+    const paddle = state.paddles[side];
+    const ball = state.ball;
 
-  const up = Boolean(input.up);
-  const down = Boolean(input.down);
+    if (!overlaps(ball, paddle)) return false;
 
-  if (up || down) {
-    // Both at once cancel out and the paddle holds still. It does not fall
-    // through to the pointer — the player has their hands on the keys.
-    if (up !== down) paddle.y += up ? -RULES.paddleSpeed : RULES.paddleSpeed;
+    ball.dx = Math.abs(ball.dx) * (side === 'left' ? 1 : -1);
+
+    // Where on the paddle it landed, from -1 at the top to +1 at the bottom.
+    const contact = (ball.y - (paddle.y + paddle.height / 2)) / (paddle.height / 2);
+    ball.dy += contact * RULES.spin;
+
+    // Push it clear so the next frame does not find them still overlapping.
+    ball.x =
+      side === 'left'
+        ? paddle.x + paddle.width + ball.size
+        : paddle.x - ball.size;
+
+    capSpeed(ball);
+    return true;
+  }
+
+  /** Hold the ball's total speed at or below the cap, keeping its direction. */
+  function capSpeed(ball) {
+    const speed = Math.hypot(ball.dx, ball.dy);
+    if (speed > RULES.maxSpeed) {
+      ball.dx = (ball.dx / speed) * RULES.maxSpeed;
+      ball.dy = (ball.dy / speed) * RULES.maxSpeed;
+    }
+    return ball;
+  }
+
+  /** Put the ball back in the middle, served towards a random side. */
+  function serve(state, random = Math.random) {
+    const ball = state.ball;
+    ball.x = state.field.width / 2;
+    ball.y = state.field.height / 2;
+    ball.dx = (random() > 0.5 ? 1 : -1) * RULES.serveSpeed;
+    ball.dy = (random() - 0.5) * RULES.serveSpeed;
+    return state;
+  }
+
+  /** Back to nil-nil with everything centred. */
+  function resetMatch(state, random = Math.random) {
+    state.score.player = 0;
+    state.score.computer = 0;
+    state.paddles.left.y = state.field.height / 2 - RULES.paddleHeight / 2;
+    state.paddles.right.y = state.field.height / 2 - RULES.paddleHeight / 2;
+    state.gameOver = false;
+    return serve(state, random);
+  }
+
+  /** Move a paddle towards a target, at its own speed, with a dead zone. */
+  function trackTowards(paddle, targetCentre, speed, field) {
+    const centre = paddle.y + paddle.height / 2;
+    if (Math.abs(centre - targetCentre) > RULES.deadZone) {
+      paddle.y += centre < targetCentre ? speed : -speed;
+    }
     return clampPaddle(paddle, field);
   }
 
-  if (input.pointer && Number.isFinite(input.pointerY)) {
-    return trackTowards(paddle, input.pointerY, RULES.paddleSpeed, field);
+  /** The computer follows the ball. */
+  function updateAI(state) {
+    return trackTowards(state.paddles.right, state.ball.y, RULES.aiSpeed, state.field);
   }
 
-  return clampPaddle(paddle, field);
-}
+  /**
+   * Move the player's paddle from an input reading.
+   *
+   * `input` is whatever the browser last knew: `{ up, down, pointerY, pointer }`.
+   * `pointer` says whether the pointer is the thing currently driving — without
+   * it the pointer branch runs every frame and drags the paddle straight back
+   * to where the mouse is resting, so the arrow keys appear to do nothing.
+   *
+   * Keys win over the pointer when both are given, because a key is a
+   * deliberate press and a resting pointer is not.
+   */
+  function updatePlayer(state, input = {}) {
+    const paddle = state.paddles.left;
+    const field = state.field;
 
-/**
- * Advance one step: move the ball, bounce it, award a point if it left.
- * Returns 'player', 'computer' or null depending on who scored.
- */
-function stepBall(state, random = Math.random) {
-  const { ball, field } = state;
+    const up = Boolean(input.up);
+    const down = Boolean(input.down);
 
-  ball.x += ball.dx;
-  ball.y += ball.dy;
+    if (up || down) {
+      // Both at once cancel out and the paddle holds still. It does not fall
+      // through to the pointer — the player has their hands on the keys.
+      if (up !== down) paddle.y += up ? -RULES.paddleSpeed : RULES.paddleSpeed;
+      return clampPaddle(paddle, field);
+    }
 
-  // Top and bottom walls.
-  if (ball.y - ball.size < 0 || ball.y + ball.size > field.height) {
-    ball.dy = Math.abs(ball.dy) * (ball.y - ball.size < 0 ? 1 : -1);
-    ball.y = clamp(ball.y, ball.size, field.height - ball.size);
+    if (input.pointer && Number.isFinite(input.pointerY)) {
+      return trackTowards(paddle, input.pointerY, RULES.paddleSpeed, field);
+    }
+
+    return clampPaddle(paddle, field);
   }
 
-  bounceOffPaddle(state, 'left');
-  bounceOffPaddle(state, 'right');
+  /**
+   * Advance one step: move the ball, bounce it, award a point if it left.
+   * Returns 'player', 'computer' or null depending on who scored.
+   */
+  function stepBall(state, random = Math.random) {
+    const { ball, field } = state;
 
-  let scorer = null;
-  if (ball.x + ball.size < 0) scorer = 'computer';
-  else if (ball.x - ball.size > field.width) scorer = 'player';
+    ball.x += ball.dx;
+    ball.y += ball.dy;
 
-  if (scorer) {
-    state.score[scorer] += 1;
-    if (state.score[scorer] >= RULES.winScore) state.gameOver = true;
-    else serve(state, random);
+    // Top and bottom walls.
+    if (ball.y - ball.size < 0 || ball.y + ball.size > field.height) {
+      ball.dy = Math.abs(ball.dy) * (ball.y - ball.size < 0 ? 1 : -1);
+      ball.y = clamp(ball.y, ball.size, field.height - ball.size);
+    }
+
+    bounceOffPaddle(state, 'left');
+    bounceOffPaddle(state, 'right');
+
+    let scorer = null;
+    if (ball.x + ball.size < 0) scorer = 'computer';
+    else if (ball.x - ball.size > field.width) scorer = 'player';
+
+    if (scorer) {
+      state.score[scorer] += 1;
+      if (state.score[scorer] >= RULES.winScore) state.gameOver = true;
+      else serve(state, random);
+    }
+
+    return scorer;
   }
 
-  return scorer;
-}
+  /** Who has won, or null while the match is still on. */
+  function winner(state) {
+    if (state.score.player >= RULES.winScore) return 'player';
+    if (state.score.computer >= RULES.winScore) return 'computer';
+    return null;
+  }
 
-/** Who has won, or null while the match is still on. */
-function winner(state) {
-  if (state.score.player >= RULES.winScore) return 'player';
-  if (state.score.computer >= RULES.winScore) return 'computer';
-  return null;
-}
+  const ENGINE = {
+    FIELD,
+    RULES,
+    createState,
+    clamp,
+    clampPaddle,
+    overlaps,
+    bounceOffPaddle,
+    capSpeed,
+    serve,
+    resetMatch,
+    trackTowards,
+    updateAI,
+    updatePlayer,
+    stepBall,
+    winner,
+  };
 
-const ENGINE = {
-  FIELD,
-  RULES,
-  createState,
-  clamp,
-  clampPaddle,
-  overlaps,
-  bounceOffPaddle,
-  capSpeed,
-  serve,
-  resetMatch,
-  trackTowards,
-  updateAI,
-  updatePlayer,
-  stepBall,
-  winner,
-};
-
-// Browser: a plain <script> tag, so hang it on window.
-if (typeof window !== 'undefined') window.ENGINE = ENGINE;
-// Node: CommonJS, so the tests can require it. Same object either way.
-if (typeof module !== 'undefined' && module.exports) module.exports = ENGINE;
+  // Browser: a plain <script> tag, so hang it on window.
+  if (typeof window !== 'undefined') window.ENGINE = ENGINE;
+  // Node: CommonJS, so the tests can require it. Same object either way.
+  if (typeof module !== 'undefined' && module.exports) module.exports = ENGINE;
+})();
