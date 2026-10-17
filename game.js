@@ -27,6 +27,9 @@ const {
 
 const state = createState({ width: canvas.width, height: canvas.height });
 
+/** Below this an exchange is not a rally, it is just play. */
+const RALLY_WORTH_SHOWING = 3;
+
 /* ------------------------------------------------------------- settings -- */
 
 const modeSelect = document.getElementById('mode');
@@ -220,6 +223,16 @@ function drawResult(who) {
   );
   ctx.font = '20px Arial';
   ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
+
+  if (state.longestRally >= RALLY_WORTH_SHOWING) {
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#9a9a9a';
+    ctx.fillText(
+      `Longest rally: ${state.longestRally} returns`,
+      canvas.width / 2,
+      canvas.height / 2 + 85,
+    );
+  }
 }
 
 function drawPaused() {
@@ -240,6 +253,30 @@ function drawPaused() {
   );
 }
 
+/**
+ * The rally count, above the board.
+ *
+ * Only once an exchange is worth calling one. A "1" over every serve is
+ * noise, and a counter that is almost always showing its lowest value reads
+ * as broken rather than as quiet.
+ */
+function drawRally() {
+  const showing = state.rally >= RALLY_WORTH_SHOWING;
+  const best = state.longestRally >= RALLY_WORTH_SHOWING;
+  if (!showing && !best) return;
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 22px Arial';
+  ctx.fillStyle = showing ? '#00ff88' : '#4a4a4a';
+  ctx.fillText(showing ? `RALLY ${state.rally}` : `BEST ${state.longestRally}`, canvas.width / 2, 34);
+
+  if (showing && best) {
+    ctx.font = '13px Arial';
+    ctx.fillStyle = '#6a6a6a';
+    ctx.fillText(`BEST ${state.longestRally}`, canvas.width / 2, 54);
+  }
+}
+
 function draw() {
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -251,6 +288,8 @@ function draw() {
 
   document.getElementById('playerScore').textContent = state.score.player;
   document.getElementById('computerScore').textContent = state.score.computer;
+
+  drawRally();
 
   const result = winner(state);
   if (result) drawResult(result);

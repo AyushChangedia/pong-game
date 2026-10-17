@@ -137,6 +137,24 @@ function loadPage() {
     registrations(type) {
       return listeners[type] || [];
     },
+    /**
+     * Play, tracking the ball with the pointer.
+     *
+     * The default page leaves the paddle wherever the cursor is resting, so a
+     * rally never gets past a return or two. A test about rallies has to
+     * actually play one.
+     */
+    play(count) {
+      for (let i = 0; i < count; i += 1) {
+        const arcs = page.drawn.filter(([key]) => key === 'arc');
+        if (arcs.length) {
+          const ballY = arcs[arcs.length - 1][1][1];
+          page.fire('mousemove', { clientY: ballY });
+        }
+        page.frames(1);
+      }
+      return page;
+    },
     /** Switch the right paddle the way a person would. */
     chooseMode(value) {
       mode.value = value;
@@ -305,6 +323,69 @@ test('time spent away is not played out on the first frame back', () => {
   const before = ballAfter();
   page.gap(30_000, 1);
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
+});
+
+/* ------------------------------------------------------------- the rally -- */
+
+/** Every string the page has drawn so far. */
+const textsOn = (page) =>
+  page.drawn.filter(([key]) => key === 'fillText').map(([, args]) => String(args[0]));
+
+/** The strings drawn on the most recent frame only. */
+function latestTexts(page) {
+  const before = page.drawn.length;
+  page.frames(1);
+  return page.drawn
+    .slice(before)
+    .filter(([key]) => key === 'fillText')
+    .map(([, args]) => String(args[0]));
+}
+
+test('a short exchange does not put a counter on the board', () => {
+  // A "1" over every serve is noise, and a counter almost always showing its
+  // lowest value reads as broken rather than as quiet.
+  const page = loadPage().frames(90);
+  assert.ok(
+    !latestTexts(page).some((t) => t.startsWith('RALLY')),
+    'a rally was announced before there was one',
+  );
+});
+
+test('a real rally is counted on the board', () => {
+  const page = loadPage().frames(1).play(1200);
+  assert.ok(
+    textsOn(page).some((t) => /^RALLY \d+$/.test(t)),
+    'no rally was ever shown across a whole match',
+  );
+});
+
+test('the best rally of the match is kept on screen', () => {
+  const page = loadPage().frames(1).play(1500);
+  assert.ok(
+    textsOn(page).some((t) => /^BEST \d+$/.test(t)),
+    'the best rally was never shown',
+  );
+});
+
+test('the result screen reports the longest rally', () => {
+  const page = loadPage().frames(1).play(1500).frames(40_000);
+  const texts = latestTexts(page);
+  assert.ok(texts.some((t) => /WIN|GAME OVER/.test(t)), texts.join(' | '));
+  assert.ok(
+    texts.some((t) => /Longest rally: \d+ returns/.test(t)),
+    texts.join(' | '),
+  );
+});
+
+test('a new match starts the counter over', () => {
+  const page = loadPage().frames(1).play(1500).frames(40_000);
+  page.fire('keydown', press(' '));
+  page.frames(1);
+
+  assert.ok(
+    !latestTexts(page).some((t) => /^(RALLY|BEST) \d+$/.test(t)),
+    'the previous match\'s rally survived into the new one',
+  );
 });
 
 /* ------------------------------------------------------------ two players -- */
