@@ -36,6 +36,25 @@
     spin: 3,
     /** The dead zone that stops a paddle jittering around its target. */
     deadZone: 5,
+    /**
+     * How much faster the ball gets with each return.
+     *
+     * A rally at one constant speed has no shape: the twentieth exchange is
+     * exactly as easy as the first, so a good rally ends only when somebody
+     * stops concentrating. Multiplying by a little over one each time means a
+     * long rally gets genuinely harder and ends because it was hard.
+     */
+    rallySpeedUp: 1.04,
+    /**
+     * The least horizontal speed the ball is allowed to keep.
+     *
+     * Spin adds to dy and the cap then scales both components down, so a long
+     * rally can grind dx towards nothing and leave the ball drifting almost
+     * straight up and down between the walls, never reaching either paddle.
+     * Speeding the ball up each return makes that happen sooner. A floor on
+     * dx means the ball is always on its way somewhere.
+     */
+    minHorizontalSpeed: 2,
   };
 
   function createState(field = FIELD) {
@@ -63,6 +82,8 @@
         size: RULES.ballSize,
       },
       score: { player: 0, computer: 0 },
+      /** Returns in the current rally. Resets on every serve. */
+      rally: 0,
       gameOver: false,
       paused: false,
     };
@@ -118,8 +139,33 @@
         ? paddle.x + paddle.width + ball.size
         : paddle.x - ball.size;
 
+    state.rally += 1;
+    ball.dx *= RULES.rallySpeedUp;
+    ball.dy *= RULES.rallySpeedUp;
+
     capSpeed(ball);
+    keepMovingAcross(ball);
     return true;
+  }
+
+  /**
+   * Keep the ball crossing the field, not just bouncing between the walls.
+   *
+   * Trades vertical speed for horizontal rather than simply adding: the total
+   * speed is what the cap just decided, and it should stay decided.
+   */
+  function keepMovingAcross(ball) {
+    const floor = RULES.minHorizontalSpeed;
+    if (Math.abs(ball.dx) >= floor) return ball;
+
+    const speed = Math.hypot(ball.dx, ball.dy);
+    const across = Math.min(floor, speed || floor);
+    const direction = ball.dx < 0 ? -1 : 1;
+    const remaining = Math.max(0, speed * speed - across * across);
+
+    ball.dx = across * direction;
+    ball.dy = Math.sqrt(remaining) * (ball.dy < 0 ? -1 : 1);
+    return ball;
   }
 
   /** Hold the ball's total speed at or below the cap, keeping its direction. */
@@ -135,6 +181,7 @@
   /** Put the ball back in the middle, served towards a random side. */
   function serve(state, random = Math.random) {
     const ball = state.ball;
+    state.rally = 0;
     ball.x = state.field.width / 2;
     ball.y = state.field.height / 2;
     ball.dx = (random() > 0.5 ? 1 : -1) * RULES.serveSpeed;
@@ -314,6 +361,7 @@
     overlaps,
     bounceOffPaddle,
     capSpeed,
+    keepMovingAcross,
     serve,
     resetMatch,
     trackTowards,

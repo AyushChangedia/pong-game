@@ -396,10 +396,12 @@ test('tapping the board restarts a finished match', () => {
 });
 
 test('space does nothing while a match is still being played', () => {
-  const page = loadPage().frames(600);
+  // Long enough for a point: the ball speeds up over a rally, so the opening
+  // exchanges of a match are the slow ones.
+  const page = loadPage().frames(900);
   const total = () =>
     Number(page.elements.playerScore.textContent) + Number(page.elements.computerScore.textContent);
-  assert.ok(total() > 0, 'no point was scored in ten seconds, so this proves nothing');
+  assert.ok(total() > 0, 'no point was scored at all, so this proves nothing');
 
   page.fire('keydown', press(' '));
   page.frames(1);
