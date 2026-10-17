@@ -261,6 +261,49 @@ canvas.addEventListener('touchend', () => {
   if (state.gameOver) resetMatch(state);
 });
 
+/* ------------------------------------------------------------ announcing -- */
+
+const announcer = document.getElementById('announcer');
+
+/**
+ * Say the score out loud, for anyone not looking at the canvas.
+ *
+ * Everything the game draws is invisible to a screen reader — a canvas is one
+ * image that happens to change sixty times a second. A polite live region is
+ * the whole accessible interface, so what goes in it has to be the things
+ * that actually changed and nothing else.
+ *
+ * Only written when the text differs. Setting the same string again
+ * re-announces it in some screen readers, and a score read aloud sixty times
+ * a second is worse than no announcement at all.
+ */
+let announced = '';
+
+function announce(text) {
+  if (!announcer || text === announced) return;
+  announced = text;
+  announcer.textContent = text;
+}
+
+function updateAnnouncement() {
+  const result = winner(state);
+  if (result) {
+    announce(
+      `${result === 'player' ? 'You win' : 'Computer wins'}, ` +
+        `${state.score.player} to ${state.score.computer}. ` +
+        `Longest rally ${state.longestRally}. Press space to play again.`,
+    );
+    return;
+  }
+
+  if (state.paused) {
+    announce('Paused. Press P to carry on.');
+    return;
+  }
+
+  announce(`Player ${state.score.player}, computer ${state.score.computer}.`);
+}
+
 /* -------------------------------------------------------------- drawing -- */
 
 function drawPaddle(paddle) {
@@ -377,6 +420,7 @@ function draw() {
   document.getElementById('computerScore').textContent = state.score.computer;
 
   drawRally();
+  updateAnnouncement();
 
   const result = winner(state);
   if (result) drawResult(result);

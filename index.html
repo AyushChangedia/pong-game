@@ -37,7 +37,13 @@
             </select>
         </div>
 
-        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        <canvas id="gameCanvas" width="800" height="400" role="img"
+                aria-label="Pong board. The score is announced below."></canvas>
+
+        <!-- Everything on the canvas is invisible to a screen reader: it is one
+             image that changes sixty times a second. This line is the game's
+             actual output for anyone not looking at it. -->
+        <p id="announcer" class="sr-only" role="status" aria-live="polite"></p>
         
         <div class="instructions">
             <p><strong>Controls:</strong></p>

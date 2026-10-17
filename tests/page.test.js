@@ -114,8 +114,19 @@ function loadPage({ audio = true } = {}) {
     },
   };
 
+  const announcements = [];
+  const announcer = {
+    get textContent() {
+      return announcements[announcements.length - 1] || '';
+    },
+    set textContent(value) {
+      announcements.push(value);
+    },
+  };
+
   const elements = {
     gameCanvas: canvas,
+    announcer,
     playerScore: { textContent: '' },
     computerScore: { textContent: '' },
     difficulty,
@@ -202,6 +213,8 @@ function loadPage({ audio = true } = {}) {
       }
       return page;
     },
+    /** Everything written to the live region, in order. */
+    announcements,
     /** Every note the page has played, by pitch. */
     played,
     /** Click the mute button. */
@@ -380,6 +393,85 @@ test('time spent away is not played out on the first frame back', () => {
   const before = ballAfter();
   page.gap(30_000, 1);
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
+});
+
+/* -------------------------------------------------------- the announcer -- */
+
+test('the page carries a live region, politely', () => {
+  // A canvas is one image that changes sixty times a second. Nothing drawn on
+  // it reaches a screen reader, so this line is the whole accessible
+  // interface.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(html, /id="announcer"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /role="status"/);
+});
+
+test('the board itself is labelled rather than left bare', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(html, /<canvas[^>]*aria-label="/);
+});
+
+test('the score is announced', () => {
+  const page = loadPage().frames(2);
+  assert.match(page.elements.announcer.textContent, /Player 0, computer 0\./);
+});
+
+test('the same score is not announced twice', () => {
+  // Writing the same string again re-reads it in some screen readers, and a
+  // score read aloud sixty times a second is worse than no announcement.
+  const page = loadPage().frames(1).play(1500).frames(2000);
+
+  // Thousands of frames, a handful of announcements — and never the same one
+  // twice in a row.
+  assert.ok(page.announcements.length < 20, page.announcements.join(' | '));
+  for (let i = 1; i < page.announcements.length; i += 1) {
+    assert.notEqual(
+      page.announcements[i],
+      page.announcements[i - 1],
+      `announcement ${i} repeats the one before it`,
+    );
+  }
+});
+
+test('a point is announced when it changes the score', () => {
+  const page = loadPage().frames(1).play(1500).frames(2000);
+  assert.ok(
+    page.announcements.some((text) => /Player [1-9]|computer [1-9]/.test(text)),
+    page.announcements.join(' | '),
+  );
+});
+
+test('pausing says so, and says the way out', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  assert.match(page.elements.announcer.textContent, /Paused\. Press P/);
+});
+
+test('resuming goes back to the score', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  assert.match(page.elements.announcer.textContent, /Player \d+, computer \d+/);
+});
+
+test('the end of the match is announced with the result and the way on', () => {
+  const page = loadPage().frames(1).play(1500).frames(40_000);
+  const last = page.elements.announcer.textContent;
+  assert.match(last, /win/i);
+  assert.match(last, /Longest rally \d+/);
+  assert.match(last, /play again/i);
+});
+
+test('a page with no announcer still runs', () => {
+  // The element is in index.html, but the game must not depend on a sibling
+  // being there.
+  const page = loadPage();
+  delete page.elements.announcer;
+  assert.doesNotThrow(() => page.frames(120));
 });
 
 /* ------------------------------------------------------------- the sound -- */
