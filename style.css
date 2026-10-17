@@ -98,6 +98,23 @@ h1 {
     cursor: pointer;
 }
 
+.settings button {
+    background: #0b0b0b;
+    color: #00ff88;
+    border: 2px solid #00ff88;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.settings button[aria-pressed="true"] {
+    color: #666666;
+    border-color: #444444;
+}
+
+.settings button:focus-visible,
 .settings select:focus-visible {
     outline: 2px solid #ffffff;
     outline-offset: 2px;

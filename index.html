@@ -27,6 +27,8 @@
                 <option value="human">Player 2</option>
             </select>
 
+            <button type="button" id="mute" aria-pressed="false">🔊 Sound</button>
+
             <label for="difficulty">Difficulty</label>
             <select id="difficulty">
                 <option value="easy">Easy</option>
@@ -40,7 +42,7 @@
         <div class="instructions">
             <p><strong>Controls:</strong></p>
             <p>🖱️ Move Mouse | ⬆️ ⬇️ Arrow Keys | 👆 Drag on the board</p>
-            <p>⏸️ <strong>P</strong> or <strong>Esc</strong> to pause</p>
+            <p>⏸️ <strong>P</strong> or <strong>Esc</strong> to pause | 🔇 <strong>M</strong> to mute</p>
             <p>Player 2: <strong>W</strong> / <strong>S</strong> — switch the right paddle above</p>
             <p><strong>First to 5 points wins!</strong> Press Space — or tap the board — to play again.</p>
         </div>
@@ -48,6 +50,7 @@
 
     <!-- The rules first: game.js reads window.ENGINE as it starts. -->
     <script src="engine.js"></script>
+    <script src="sound.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

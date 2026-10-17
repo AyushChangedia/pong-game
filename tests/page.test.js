@@ -26,7 +26,7 @@ const ROOT = path.join(__dirname, '..');
 const FRAME_MS = 1000 / 60;
 
 /** A page with the two scripts in it, and the handles to poke at it. */
-function loadPage() {
+function loadPage({ audio = true } = {}) {
   const drawn = [];
   const ctx = new Proxy(
     {},
@@ -61,6 +61,47 @@ function loadPage() {
     },
   };
 
+  const played = [];
+
+  class FakeAudioContext {
+    constructor() {
+      this.state = 'running';
+      this.currentTime = 0;
+      this.destination = {};
+    }
+    resume() {}
+    createOscillator() {
+      const node = {
+        frequency: { value: 0 },
+        connect() {},
+        start() {},
+        stop: () => played.push(node.frequency.value),
+      };
+      return node;
+    }
+    createGain() {
+      return {
+        gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+        connect() {},
+      };
+    }
+  }
+
+  const mute = {
+    textContent: '',
+    attributes: {},
+    blurred: 0,
+    blur() {
+      mute.blurred += 1;
+    },
+    setAttribute(name, value) {
+      mute.attributes[name] = value;
+    },
+    addEventListener: (type, fn) => {
+      (listeners[`mute:${type}`] || (listeners[`mute:${type}`] = [])).push({ fn });
+    },
+  };
+
   const difficulty = {
     value: 'normal',
     disabled: false,
@@ -79,12 +120,17 @@ function loadPage() {
     computerScore: { textContent: '' },
     difficulty,
     mode,
+    mute,
   };
 
   let pending = null;
 
   const sandbox = {
-    window: { addEventListener: listen('window:'), devicePixelRatio: 1 },
+    window: {
+      addEventListener: listen('window:'),
+      devicePixelRatio: 1,
+      AudioContext: audio ? FakeAudioContext : undefined,
+    },
     document: {
       getElementById: (id) => elements[id],
       addEventListener: listen(''),
@@ -101,7 +147,7 @@ function loadPage() {
   };
 
   vm.createContext(sandbox);
-  for (const file of ['engine.js', 'game.js']) {
+  for (const file of ['engine.js', 'sound.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), sandbox, { filename: file });
   }
 
@@ -156,6 +202,14 @@ function loadPage() {
       }
       return page;
     },
+    /** Every note the page has played, by pitch. */
+    played,
+    /** Click the mute button. */
+    clickMute() {
+      for (const { fn } of listeners['mute:click'] || []) fn({});
+      return page;
+    },
+    mute,
     /** Switch the right paddle the way a person would. */
     chooseMode(value) {
       mode.value = value;
@@ -201,14 +255,15 @@ test('index.html loads the engine before the game that reads it', () => {
   );
 });
 
-test('only the engine is published to the window', () => {
-  // Everything else the two files declare stays inside their closures, which
-  // is what keeps them from colliding in the first place.
+test('only the shared modules are published to the window', () => {
+  // Everything else the files declare stays inside their closures, which is
+  // what keeps them from colliding in the first place.
   const { sandbox } = loadPage();
   assert.equal(typeof sandbox.window.ENGINE, 'object');
-  const harness = new Set(['addEventListener', 'devicePixelRatio']);
+  assert.equal(typeof sandbox.window.SOUND, 'object');
+  const harness = new Set(['addEventListener', 'devicePixelRatio', 'AudioContext']);
   const added = Object.keys(sandbox.window).filter((key) => !harness.has(key));
-  assert.deepEqual(added, ['ENGINE']);
+  assert.deepEqual(added.sort(), ['ENGINE', 'SOUND']);
 });
 
 /* ------------------------------------------------------------- the loop -- */
@@ -325,6 +380,87 @@ test('time spent away is not played out on the first frame back', () => {
   const before = ballAfter();
   page.gap(30_000, 1);
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
+});
+
+/* ------------------------------------------------------------- the sound -- */
+
+test('index.html loads the sound before the game that uses it', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const loaded = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(loaded.includes('sound.js'), loaded.join(', '));
+  assert.ok(loaded.indexOf('sound.js') < loaded.indexOf('game.js'), loaded.join(', '));
+});
+
+test('a rally makes noises', () => {
+  const page = loadPage().frames(1).play(1200);
+  assert.ok(page.played.length > 0, 'the whole rally was silent');
+});
+
+test('a bounce and a point do not sound the same', () => {
+  const { NOTES } = require(path.join(ROOT, 'sound.js'));
+  // A tracked rally for the paddle notes, then a stretch with nobody chasing
+  // the ball, which is how a point gets conceded.
+  const page = loadPage().frames(1).play(1500).frames(2000);
+
+  assert.ok(page.played.includes(NOTES.paddle.hz), 'no paddle note was played');
+  assert.ok(page.played.includes(NOTES.point.hz), 'no point note was played');
+  assert.ok(
+    new Set(page.played).size > 1,
+    'every event made exactly the same noise',
+  );
+});
+
+test('the mute button silences the game', () => {
+  const page = loadPage().frames(1);
+  page.clickMute();
+
+  const before = page.played.length;
+  page.play(1200);
+  assert.equal(page.played.length, before, 'muting did not silence anything');
+});
+
+test('M mutes too, and again unmutes', () => {
+  const page = loadPage().frames(1);
+  page.fire('keydown', press('m'));
+
+  const quiet = page.played.length;
+  page.play(600);
+  assert.equal(page.played.length, quiet);
+
+  page.fire('keydown', press('m'));
+  page.play(1200);
+  assert.ok(page.played.length > quiet, 'unmuting did not bring the sound back');
+});
+
+test('the button says which way it is set, to a screen reader as well', () => {
+  // aria-pressed, not just a label: a switch should read as a switch rather
+  // than as an emoji and a word.
+  const page = loadPage().frames(1);
+  assert.equal(page.mute.attributes['aria-pressed'], 'false');
+  assert.match(page.mute.textContent, /Sound/);
+
+  page.clickMute();
+  assert.equal(page.mute.attributes['aria-pressed'], 'true');
+  assert.match(page.mute.textContent, /Muted/);
+});
+
+test('the mute button gives the keyboard back', () => {
+  // Otherwise space, which plays again, presses this button instead.
+  const page = loadPage().frames(1);
+  page.clickMute();
+  assert.equal(page.mute.blurred, 1);
+});
+
+test('M works while the game is paused', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.fire('keydown', press('m'));
+  assert.equal(page.mute.attributes['aria-pressed'], 'true');
+});
+
+test('a browser with no audio is a silent game, not a broken one', () => {
+  const page = loadPage({ audio: false });
+  assert.doesNotThrow(() => page.frames(1).play(600));
 });
 
 /* -------------------------------------------------------- the pixel ratio -- */

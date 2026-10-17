@@ -69,10 +69,42 @@ const {
 
 const state = createState({ width: FIELD.width, height: FIELD.height });
 
+/**
+ * The noises, if this browser makes any.
+ *
+ * sound.js loads before this file, but a missing script should mean a silent
+ * game rather than a page that fails on its first line.
+ */
+// The API is handed over rather than looked up, so the only place that knows
+// where it lives is the page — which is the only place that should.
+const sound = window.SOUND
+  ? window.SOUND.createSound(window.AudioContext || window.webkitAudioContext)
+  : { play() {}, setMuted() {}, toggleMuted() { return false; }, muted: false };
+
 /** Below this an exchange is not a rally, it is just play. */
 const RALLY_WORTH_SHOWING = 3;
 
 /* ------------------------------------------------------------- settings -- */
+
+const muteButton = document.getElementById('mute');
+
+function showMuted() {
+  if (!muteButton) return;
+  muteButton.textContent = sound.muted ? '🔇 Muted' : '🔊 Sound';
+  // aria-pressed, not just the label: a screen reader should know this is a
+  // switch and which way it is set, not read an emoji and a word.
+  muteButton.setAttribute('aria-pressed', String(sound.muted));
+}
+
+if (muteButton) {
+  showMuted();
+  muteButton.addEventListener('click', () => {
+    sound.toggleMuted();
+    showMuted();
+    // Otherwise space, which plays again, presses this button instead.
+    muteButton.blur();
+  });
+}
 
 const modeSelect = document.getElementById('mode');
 const difficultySelect = document.getElementById('difficulty');
@@ -134,6 +166,14 @@ document.addEventListener('keydown', (e) => {
   if (state.gameOver && (e.key === ' ' || e.key === 'Enter')) {
     e.preventDefault();
     resetMatch(state);
+    return;
+  }
+
+  // M mutes. Checked before the pause keys so it works while paused too.
+  if (e.key === 'm' || e.key === 'M') {
+    e.preventDefault();
+    sound.toggleMuted();
+    showMuted();
     return;
   }
 
@@ -391,7 +431,11 @@ function gameLoop(now) {
     for (let i = 0; i < plan.steps; i += 1) {
       updatePlayer(state, input);
       updateOpponent(state, opponentInput);
-      stepBall(state);
+
+      const events = stepBall(state);
+      if (events.scorer) sound.play('point');
+      else if (events.hitPaddle) sound.play('paddle');
+      else if (events.hitWall) sound.play('wall');
     }
   }
 
