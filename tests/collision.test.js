@@ -101,10 +101,18 @@ test('hitting below centre sends the ball downwards', () => {
   assert.ok(state.ball.dy > 0, `dy was ${state.ball.dy}`);
 });
 
-test('hitting dead centre leaves the vertical direction alone', () => {
+test('hitting dead centre adds no spin, only the rally speed-up', () => {
+  // The contact point is what bends the bounce, and dead centre bends it by
+  // nothing. The ball still leaves faster, because every return does — so
+  // what is pinned here is the direction, not the magnitude.
   const state = touching(at({ dx: -5, dy: 2 }), 'left');
   E.bounceOffPaddle(state, 'left');
-  assert.ok(Math.abs(state.ball.dy - 2) < 1e-9, `dy became ${state.ball.dy}`);
+
+  assert.ok(state.ball.dy > 0, `dy flipped: ${state.ball.dy}`);
+  assert.ok(
+    Math.abs(state.ball.dy - 2 * E.RULES.rallySpeedUp) < 1e-9,
+    `dy became ${state.ball.dy}, not 2 × the speed-up`,
+  );
 });
 
 /* --------------------------------------------------------------- speed -- */

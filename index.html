@@ -20,18 +20,43 @@
             </div>
         </div>
         
-        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        <div class="settings">
+            <label for="mode">Right paddle</label>
+            <select id="mode">
+                <option value="computer" selected>Computer</option>
+                <option value="human">Player 2</option>
+            </select>
+
+            <button type="button" id="mute" aria-pressed="false">🔊 Sound</button>
+
+            <label for="difficulty">Difficulty</label>
+            <select id="difficulty">
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="hard">Hard</option>
+            </select>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="400" role="img"
+                aria-label="Pong board. The score is announced below."></canvas>
+
+        <!-- Everything on the canvas is invisible to a screen reader: it is one
+             image that changes sixty times a second. This line is the game's
+             actual output for anyone not looking at it. -->
+        <p id="announcer" class="sr-only" role="status" aria-live="polite"></p>
         
         <div class="instructions">
             <p><strong>Controls:</strong></p>
             <p>🖱️ Move Mouse | ⬆️ ⬇️ Arrow Keys | 👆 Drag on the board</p>
-            <p>Computer controls the right paddle</p>
+            <p>⏸️ <strong>P</strong> or <strong>Esc</strong> to pause | 🔇 <strong>M</strong> to mute</p>
+            <p>Player 2: <strong>W</strong> / <strong>S</strong> — switch the right paddle above</p>
             <p><strong>First to 5 points wins!</strong> Press Space — or tap the board — to play again.</p>
         </div>
     </div>
 
     <!-- The rules first: game.js reads window.ENGINE as it starts. -->
     <script src="engine.js"></script>
+    <script src="sound.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

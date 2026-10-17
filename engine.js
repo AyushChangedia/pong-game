@@ -36,7 +36,66 @@
     spin: 3,
     /** The dead zone that stops a paddle jittering around its target. */
     deadZone: 5,
+    /**
+     * How much faster the ball gets with each return.
+     *
+     * A rally at one constant speed has no shape: the twentieth exchange is
+     * exactly as easy as the first, so a good rally ends only when somebody
+     * stops concentrating. Multiplying by a little over one each time means a
+     * long rally gets genuinely harder and ends because it was hard.
+     */
+    rallySpeedUp: 1.04,
+    /**
+     * The least horizontal speed the ball is allowed to keep.
+     *
+     * Spin adds to dy and the cap then scales both components down, so a long
+     * rally can grind dx towards nothing and leave the ball drifting almost
+     * straight up and down between the walls, never reaching either paddle.
+     * Speeding the ball up each return makes that happen sooner. A floor on
+     * dx means the ball is always on its way somewhere.
+     */
+    minHorizontalSpeed: 2,
+    /**
+     * Steps the ball waits at the centre line before a serve goes.
+     *
+     * Sixty, so one second. A point used to end and the next one begin in the
+     * same frame: the ball vanished off one edge and was already travelling
+     * from the middle before anybody had registered the first thing. A beat
+     * to see the score change is the difference between a rally ending and a
+     * rally being interrupted.
+     */
+    serveDelaySteps: 60,
   };
+
+  /**
+   * How good the computer is, and in what way.
+   *
+   * Speed alone is a poor difficulty knob. A paddle that tracks the ball
+   * perfectly and only moves slowly is not an easier opponent so much as a
+   * differently-shaped wall: it never misreads anything, so the only way past
+   * it is to out-run it. These three differ in how well the computer reads
+   * the ball as well as how fast it can act on that reading.
+   *
+   * `aim` is how far off-centre of the ball it tries to be, as a fraction of
+   * the paddle's own height — a steady misjudgement, not a jitter, so the
+   * same shot is misread the same way and the player can learn it.
+   *
+   * `reach` is how far up the field it starts tracking, as a fraction of the
+   * width. Below it the computer waits in place, which is what makes an easy
+   * opponent beatable by a shot played early rather than only by a fast one.
+   */
+  const DIFFICULTY = {
+    easy: { speed: 3.5, aim: 0.45, reach: 0.45 },
+    normal: { speed: 5, aim: 0.2, reach: 0.75 },
+    hard: { speed: 7, aim: 0, reach: 1 },
+  };
+
+  const DEFAULT_DIFFICULTY = 'normal';
+
+  /** The named settings, or the default for anything unrecognised. */
+  function difficultyOf(name) {
+    return DIFFICULTY[name] || DIFFICULTY[DEFAULT_DIFFICULTY];
+  }
 
   function createState(field = FIELD) {
     return {
@@ -63,7 +122,17 @@
         size: RULES.ballSize,
       },
       score: { player: 0, computer: 0 },
+      /** Returns in the current rally. Resets on every serve. */
+      rally: 0,
+      /** The best rally of the match so far. Survives every serve. */
+      longestRally: 0,
+      /** Steps still to wait before the ball is released. */
+      serveWait: 0,
+      difficulty: DEFAULT_DIFFICULTY,
+      /** Whether the right paddle is a person or the computer. */
+      twoPlayer: false,
       gameOver: false,
+      paused: false,
     };
   }
 
@@ -117,8 +186,39 @@
         ? paddle.x + paddle.width + ball.size
         : paddle.x - ball.size;
 
+    state.rally += 1;
+    // Recorded as it happens, not when the rally ends. A rally that is still
+    // running is already the longest one if it has gone on long enough, and
+    // counting it only at the end would leave the display a beat behind the
+    // thing it is describing.
+    if (state.rally > state.longestRally) state.longestRally = state.rally;
+
+    ball.dx *= RULES.rallySpeedUp;
+    ball.dy *= RULES.rallySpeedUp;
+
     capSpeed(ball);
+    keepMovingAcross(ball);
     return true;
+  }
+
+  /**
+   * Keep the ball crossing the field, not just bouncing between the walls.
+   *
+   * Trades vertical speed for horizontal rather than simply adding: the total
+   * speed is what the cap just decided, and it should stay decided.
+   */
+  function keepMovingAcross(ball) {
+    const floor = RULES.minHorizontalSpeed;
+    if (Math.abs(ball.dx) >= floor) return ball;
+
+    const speed = Math.hypot(ball.dx, ball.dy);
+    const across = Math.min(floor, speed || floor);
+    const direction = ball.dx < 0 ? -1 : 1;
+    const remaining = Math.max(0, speed * speed - across * across);
+
+    ball.dx = across * direction;
+    ball.dy = Math.sqrt(remaining) * (ball.dy < 0 ? -1 : 1);
+    return ball;
   }
 
   /** Hold the ball's total speed at or below the cap, keeping its direction. */
@@ -132,11 +232,26 @@
   }
 
   /** Put the ball back in the middle, served towards a random side. */
-  function serve(state, random = Math.random) {
+  /**
+   * Put the ball back in the middle and send it off again.
+   *
+   * @param {'player'|'computer'|null} [towards] who to serve at. The side that
+   *   just conceded gets the ball, which is how every racket sport does it and
+   *   what keeps a run of points from compounding: losing three in a row
+   *   should not also mean watching three serves fly away from you. With
+   *   nobody named — the opening serve — the coin decides.
+   */
+  function serve(state, random = Math.random, towards = null, delay = 0) {
     const ball = state.ball;
+    state.rally = 0;
+    state.serveWait = Math.max(0, Math.round(delay) || 0);
     ball.x = state.field.width / 2;
     ball.y = state.field.height / 2;
-    ball.dx = (random() > 0.5 ? 1 : -1) * RULES.serveSpeed;
+
+    const direction =
+      towards === 'player' ? -1 : towards === 'computer' ? 1 : random() > 0.5 ? 1 : -1;
+
+    ball.dx = direction * RULES.serveSpeed;
     ball.dy = (random() - 0.5) * RULES.serveSpeed;
     return state;
   }
@@ -145,10 +260,13 @@
   function resetMatch(state, random = Math.random) {
     state.score.player = 0;
     state.score.computer = 0;
+    // The best rally belongs to the match that produced it.
+    state.longestRally = 0;
     state.paddles.left.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.paddles.right.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.gameOver = false;
-    return serve(state, random);
+    state.paused = false;
+    return serve(state, random, null, RULES.serveDelaySteps);
   }
 
   /** Move a paddle towards a target, at its own speed, with a dead zone. */
@@ -160,9 +278,44 @@
     return clampPaddle(paddle, field);
   }
 
-  /** The computer follows the ball. */
+  /**
+   * The computer follows the ball — as well as its difficulty lets it.
+   *
+   * Three things vary: how fast it can move, how far up the field it bothers
+   * to react, and how badly it reads where the ball is going. The misread is
+   * a fixed offset rather than a random one, so the same shot fools it the
+   * same way twice and a player can learn to play it.
+   */
   function updateAI(state) {
-    return trackTowards(state.paddles.right, state.ball.y, RULES.aiSpeed, state.field);
+    const paddle = state.paddles.right;
+    const { speed, aim, reach } = difficultyOf(state.difficulty);
+
+    // How far across the field the ball has come, from 0 at the left edge.
+    const progress = state.ball.x / state.field.width;
+    if (progress < 1 - reach) return clampPaddle(paddle, state.field);
+
+    // Lean the wrong way by a fraction of the paddle, and pick the side by
+    // where the ball actually is, so it misjudges away from the middle.
+    const away = state.ball.y < state.field.height / 2 ? -1 : 1;
+    const target = state.ball.y + away * aim * paddle.height;
+
+    return trackTowards(paddle, target, speed, state.field);
+  }
+
+  /**
+   * Move the right paddle — by hand in two-player, by computer otherwise.
+   *
+   * One call either way, so the loop does not have to know which mode it is
+   * in and the two cannot get out of step.
+   */
+  function updateOpponent(state, input = {}) {
+    return state.twoPlayer ? updatePlayer(state, input, 'right') : updateAI(state);
+  }
+
+  /** Set the computer's difficulty. Unknown names fall back to the default. */
+  function setDifficulty(state, name) {
+    state.difficulty = DIFFICULTY[name] ? name : DEFAULT_DIFFICULTY;
+    return state.difficulty;
   }
 
   /**
@@ -176,8 +329,8 @@
    * Keys win over the pointer when both are given, because a key is a
    * deliberate press and a resting pointer is not.
    */
-  function updatePlayer(state, input = {}) {
-    const paddle = state.paddles.left;
+  function updatePlayer(state, input = {}, side = 'left') {
+    const paddle = state.paddles[side];
     const field = state.field;
 
     const up = Boolean(input.up);
@@ -242,8 +395,28 @@
    * Advance one step: move the ball, bounce it, award a point if it left.
    * Returns 'player', 'computer' or null depending on who scored.
    */
+  /**
+   * Advance one step and say what happened in it.
+   *
+   * The return value used to be the scorer or null, which told a caller about
+   * the rarest event in the game and nothing about the common ones. A step
+   * that bounces off a paddle looks, from outside, exactly like a step in
+   * which the ball simply moved — so anything wanting to react to a bounce
+   * had to re-derive it, by watching dx for a sign change and guessing.
+   *
+   * @returns {{scorer: ?string, hitPaddle: ?string, hitWall: boolean}}
+   */
   function stepBall(state, random = Math.random) {
     const { ball, field } = state;
+    const events = { scorer: null, hitPaddle: null, hitWall: false };
+
+    // Waiting to serve. The ball sits at the centre line, already pointed the
+    // way it is going to go, and nothing else in the step runs — a ball that
+    // cannot move also cannot bounce or score.
+    if (state.serveWait > 0) {
+      state.serveWait -= 1;
+      return events;
+    }
 
     ball.x += ball.dx;
     ball.y += ball.dy;
@@ -252,22 +425,59 @@
     if (ball.y - ball.size < 0 || ball.y + ball.size > field.height) {
       ball.dy = Math.abs(ball.dy) * (ball.y - ball.size < 0 ? 1 : -1);
       ball.y = clamp(ball.y, ball.size, field.height - ball.size);
+      events.hitWall = true;
     }
 
-    bounceOffPaddle(state, 'left');
-    bounceOffPaddle(state, 'right');
+    if (bounceOffPaddle(state, 'left')) events.hitPaddle = 'left';
+    else if (bounceOffPaddle(state, 'right')) events.hitPaddle = 'right';
 
     let scorer = null;
     if (ball.x + ball.size < 0) scorer = 'computer';
     else if (ball.x - ball.size > field.width) scorer = 'player';
 
+    events.scorer = scorer;
+
     if (scorer) {
       state.score[scorer] += 1;
       if (state.score[scorer] >= RULES.winScore) state.gameOver = true;
-      else serve(state, random);
+      // The one who conceded receives. `scorer` is who won the point, so the
+      // ball goes to the other side.
+      else {
+        serve(
+          state,
+          random,
+          scorer === 'player' ? 'computer' : 'player',
+          RULES.serveDelaySteps,
+        );
+      }
     }
 
-    return scorer;
+    return events;
+  }
+
+  /**
+   * Whether the simulation should advance this step.
+   *
+   * Three things stop it, and they are not the same thing. A finished match is
+   * over and stays over. A paused match is waiting for the player to come
+   * back. Both still draw — the result screen and the pause overlay are
+   * drawings — so this is deliberately not "should we render".
+   */
+  function isRunning(state) {
+    return !state.gameOver && !state.paused;
+  }
+
+  /** Pause, resume, or flip. Does nothing to a match that has already ended. */
+  function setPaused(state, paused) {
+    // Pausing a finished match would leave a pause overlay over the result,
+    // and resuming it would have nothing to resume.
+    if (state.gameOver) return false;
+    state.paused = Boolean(paused);
+    return state.paused;
+  }
+
+  function togglePause(state) {
+    return setPaused(state, !state.paused);
   }
 
   /** Who has won, or null while the match is still on. */
@@ -287,11 +497,20 @@
     overlaps,
     bounceOffPaddle,
     capSpeed,
+    keepMovingAcross,
     serve,
     resetMatch,
+    DIFFICULTY,
+    DEFAULT_DIFFICULTY,
+    difficultyOf,
     trackTowards,
     updateAI,
+    updateOpponent,
+    setDifficulty,
     updatePlayer,
+    isRunning,
+    setPaused,
+    togglePause,
     planSteps,
     stepBall,
     winner,

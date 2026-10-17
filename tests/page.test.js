@@ -26,7 +26,7 @@ const ROOT = path.join(__dirname, '..');
 const FRAME_MS = 1000 / 60;
 
 /** A page with the two scripts in it, and the handles to poke at it. */
-function loadPage() {
+function loadPage({ audio = true } = {}) {
   const drawn = [];
   const ctx = new Proxy(
     {},
@@ -44,21 +44,104 @@ function loadPage() {
   const canvas = {
     width: 800,
     height: 400,
+    style: {},
     getContext: () => ctx,
     getBoundingClientRect: () => ({ top: 0, left: 0, height: 400, width: 800 }),
     addEventListener: listen('canvas:'),
   };
 
+  const mode = {
+    value: 'computer',
+    blurred: 0,
+    blur() {
+      mode.blurred += 1;
+    },
+    addEventListener: (type, fn) => {
+      (listeners[`mode:${type}`] || (listeners[`mode:${type}`] = [])).push({ fn });
+    },
+  };
+
+  const played = [];
+
+  class FakeAudioContext {
+    constructor() {
+      this.state = 'running';
+      this.currentTime = 0;
+      this.destination = {};
+    }
+    resume() {}
+    createOscillator() {
+      const node = {
+        frequency: { value: 0 },
+        connect() {},
+        start() {},
+        stop: () => played.push(node.frequency.value),
+      };
+      return node;
+    }
+    createGain() {
+      return {
+        gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+        connect() {},
+      };
+    }
+  }
+
+  const mute = {
+    textContent: '',
+    attributes: {},
+    blurred: 0,
+    blur() {
+      mute.blurred += 1;
+    },
+    setAttribute(name, value) {
+      mute.attributes[name] = value;
+    },
+    addEventListener: (type, fn) => {
+      (listeners[`mute:${type}`] || (listeners[`mute:${type}`] = [])).push({ fn });
+    },
+  };
+
+  const difficulty = {
+    value: 'normal',
+    disabled: false,
+    blurred: 0,
+    blur() {
+      difficulty.blurred += 1;
+    },
+    addEventListener: (type, fn) => {
+      (listeners[`difficulty:${type}`] || (listeners[`difficulty:${type}`] = [])).push({ fn });
+    },
+  };
+
+  const announcements = [];
+  const announcer = {
+    get textContent() {
+      return announcements[announcements.length - 1] || '';
+    },
+    set textContent(value) {
+      announcements.push(value);
+    },
+  };
+
   const elements = {
     gameCanvas: canvas,
+    announcer,
     playerScore: { textContent: '' },
     computerScore: { textContent: '' },
+    difficulty,
+    mode,
+    mute,
   };
 
   let pending = null;
 
   const sandbox = {
-    window: { addEventListener: listen('window:') },
+    window: {
+      addEventListener: listen('window:'),
+      devicePixelRatio: 1,
+      AudioContext: audio ? FakeAudioContext : undefined,
+    },
     document: {
       getElementById: (id) => elements[id],
       addEventListener: listen(''),
@@ -75,7 +158,7 @@ function loadPage() {
   };
 
   vm.createContext(sandbox);
-  for (const file of ['engine.js', 'game.js']) {
+  for (const file of ['engine.js', 'sound.js', 'game.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), sandbox, { filename: file });
   }
 
@@ -112,6 +195,48 @@ function loadPage() {
     registrations(type) {
       return listeners[type] || [];
     },
+    /**
+     * Play, tracking the ball with the pointer.
+     *
+     * The default page leaves the paddle wherever the cursor is resting, so a
+     * rally never gets past a return or two. A test about rallies has to
+     * actually play one.
+     */
+    play(count) {
+      for (let i = 0; i < count; i += 1) {
+        const arcs = page.drawn.filter(([key]) => key === 'arc');
+        if (arcs.length) {
+          const ballY = arcs[arcs.length - 1][1][1];
+          page.fire('mousemove', { clientY: ballY });
+        }
+        page.frames(1);
+      }
+      return page;
+    },
+    /** Everything written to the live region, in order. */
+    announcements,
+    /** Every note the page has played, by pitch. */
+    played,
+    /** Click the mute button. */
+    clickMute() {
+      for (const { fn } of listeners['mute:click'] || []) fn({});
+      return page;
+    },
+    mute,
+    /** Switch the right paddle the way a person would. */
+    chooseMode(value) {
+      mode.value = value;
+      for (const { fn } of listeners['mode:change'] || []) fn({});
+      return page;
+    },
+    mode,
+    /** Pick a difficulty the way a person would. */
+    chooseDifficulty(value) {
+      difficulty.value = value;
+      for (const { fn } of listeners['difficulty:change'] || []) fn({});
+      return page;
+    },
+    difficulty,
     /** Run `count` frames as if the clock had jumped by `gapMs` first. */
     gap(gapMs, count = 1) {
       clock += gapMs;
@@ -143,13 +268,15 @@ test('index.html loads the engine before the game that reads it', () => {
   );
 });
 
-test('only the engine is published to the window', () => {
-  // Everything else the two files declare stays inside their closures, which
-  // is what keeps them from colliding in the first place.
+test('only the shared modules are published to the window', () => {
+  // Everything else the files declare stays inside their closures, which is
+  // what keeps them from colliding in the first place.
   const { sandbox } = loadPage();
   assert.equal(typeof sandbox.window.ENGINE, 'object');
-  const added = Object.keys(sandbox.window).filter((key) => key !== 'addEventListener');
-  assert.deepEqual(added, ['ENGINE']);
+  assert.equal(typeof sandbox.window.SOUND, 'object');
+  const harness = new Set(['addEventListener', 'devicePixelRatio', 'AudioContext']);
+  const added = Object.keys(sandbox.window).filter((key) => !harness.has(key));
+  assert.deepEqual(added.sort(), ['ENGINE', 'SOUND']);
 });
 
 /* ------------------------------------------------------------- the loop -- */
@@ -186,6 +313,13 @@ test('frames still draw once the match is over', () => {
 });
 
 /* ------------------------------------------------------------ the input -- */
+
+/** Where the ball was on the last frame that drew it. */
+function ballX(page) {
+  const arcs = page.drawn.filter(([key]) => key === 'arc');
+  assert.ok(arcs.length > 0, 'the ball was never drawn');
+  return arcs[arcs.length - 1][1][0];
+}
 
 /** Where the player's paddle was on the last frame that drew it. */
 function playerPaddleY(page) {
@@ -261,6 +395,558 @@ test('time spent away is not played out on the first frame back', () => {
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
 });
 
+/* -------------------------------------------------------- the announcer -- */
+
+test('the page carries a live region, politely', () => {
+  // A canvas is one image that changes sixty times a second. Nothing drawn on
+  // it reaches a screen reader, so this line is the whole accessible
+  // interface.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(html, /id="announcer"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /role="status"/);
+});
+
+test('the board itself is labelled rather than left bare', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(html, /<canvas[^>]*aria-label="/);
+});
+
+test('the score is announced', () => {
+  const page = loadPage().frames(2);
+  assert.match(page.elements.announcer.textContent, /Player 0, computer 0\./);
+});
+
+test('the same score is not announced twice', () => {
+  // Writing the same string again re-reads it in some screen readers, and a
+  // score read aloud sixty times a second is worse than no announcement.
+  const page = loadPage().frames(1).play(1500).frames(2000);
+
+  // Thousands of frames, a handful of announcements — and never the same one
+  // twice in a row.
+  assert.ok(page.announcements.length < 20, page.announcements.join(' | '));
+  for (let i = 1; i < page.announcements.length; i += 1) {
+    assert.notEqual(
+      page.announcements[i],
+      page.announcements[i - 1],
+      `announcement ${i} repeats the one before it`,
+    );
+  }
+});
+
+test('a point is announced when it changes the score', () => {
+  const page = loadPage().frames(1).play(1500).frames(2000);
+  assert.ok(
+    page.announcements.some((text) => /Player [1-9]|computer [1-9]/.test(text)),
+    page.announcements.join(' | '),
+  );
+});
+
+test('pausing says so, and says the way out', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  assert.match(page.elements.announcer.textContent, /Paused\. Press P/);
+});
+
+test('resuming goes back to the score', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  assert.match(page.elements.announcer.textContent, /Player \d+, computer \d+/);
+});
+
+test('the end of the match is announced with the result and the way on', () => {
+  const page = loadPage().frames(1).play(1500).frames(40_000);
+  const last = page.elements.announcer.textContent;
+  assert.match(last, /win/i);
+  assert.match(last, /Longest rally \d+/);
+  assert.match(last, /play again/i);
+});
+
+test('a page with no announcer still runs', () => {
+  // The element is in index.html, but the game must not depend on a sibling
+  // being there.
+  const page = loadPage();
+  delete page.elements.announcer;
+  assert.doesNotThrow(() => page.frames(120));
+});
+
+/* ------------------------------------------------------------- the sound -- */
+
+test('index.html loads the sound before the game that uses it', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const loaded = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(loaded.includes('sound.js'), loaded.join(', '));
+  assert.ok(loaded.indexOf('sound.js') < loaded.indexOf('game.js'), loaded.join(', '));
+});
+
+test('a rally makes noises', () => {
+  const page = loadPage().frames(1).play(1200);
+  assert.ok(page.played.length > 0, 'the whole rally was silent');
+});
+
+test('a bounce and a point do not sound the same', () => {
+  const { NOTES } = require(path.join(ROOT, 'sound.js'));
+  // A tracked rally for the paddle notes, then a stretch with nobody chasing
+  // the ball, which is how a point gets conceded.
+  const page = loadPage().frames(1).play(1500).frames(2000);
+
+  assert.ok(page.played.includes(NOTES.paddle.hz), 'no paddle note was played');
+  assert.ok(page.played.includes(NOTES.point.hz), 'no point note was played');
+  assert.ok(
+    new Set(page.played).size > 1,
+    'every event made exactly the same noise',
+  );
+});
+
+test('the mute button silences the game', () => {
+  const page = loadPage().frames(1);
+  page.clickMute();
+
+  const before = page.played.length;
+  page.play(1200);
+  assert.equal(page.played.length, before, 'muting did not silence anything');
+});
+
+test('M mutes too, and again unmutes', () => {
+  const page = loadPage().frames(1);
+  page.fire('keydown', press('m'));
+
+  const quiet = page.played.length;
+  page.play(600);
+  assert.equal(page.played.length, quiet);
+
+  page.fire('keydown', press('m'));
+  page.play(1200);
+  assert.ok(page.played.length > quiet, 'unmuting did not bring the sound back');
+});
+
+test('the button says which way it is set, to a screen reader as well', () => {
+  // aria-pressed, not just a label: a switch should read as a switch rather
+  // than as an emoji and a word.
+  const page = loadPage().frames(1);
+  assert.equal(page.mute.attributes['aria-pressed'], 'false');
+  assert.match(page.mute.textContent, /Sound/);
+
+  page.clickMute();
+  assert.equal(page.mute.attributes['aria-pressed'], 'true');
+  assert.match(page.mute.textContent, /Muted/);
+});
+
+test('the mute button gives the keyboard back', () => {
+  // Otherwise space, which plays again, presses this button instead.
+  const page = loadPage().frames(1);
+  page.clickMute();
+  assert.equal(page.mute.blurred, 1);
+});
+
+test('M works while the game is paused', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.fire('keydown', press('m'));
+  assert.equal(page.mute.attributes['aria-pressed'], 'true');
+});
+
+test('a browser with no audio is a silent game, not a broken one', () => {
+  const page = loadPage({ audio: false });
+  assert.doesNotThrow(() => page.frames(1).play(600));
+});
+
+/* -------------------------------------------------------- the pixel ratio -- */
+
+/** A page whose screen reports the given device pixel ratio. */
+function pageAtRatio(ratio) {
+  const page = loadPage();
+  page.sandbox.window.devicePixelRatio = ratio;
+  return page.frames(2);
+}
+
+test('on an ordinary screen the buffer is the board', () => {
+  const page = pageAtRatio(1);
+  assert.equal(page.elements.gameCanvas.width, 800);
+  assert.equal(page.elements.gameCanvas.height, 400);
+});
+
+test('on a retina screen the buffer is drawn at the real pixels', () => {
+  // The buffer and the CSS box were the same number, so the browser took an
+  // 800x400 image and scaled it up: soft edges on the ball and a centre line
+  // that shimmered, on hardware with the pixels to draw both exactly.
+  const page = pageAtRatio(2);
+  assert.equal(page.elements.gameCanvas.width, 1600);
+  assert.equal(page.elements.gameCanvas.height, 800);
+});
+
+test('the board stays the same size on the page', () => {
+  // Only the buffer grows. Sizing the CSS box too would make the board twice
+  // as big on a retina screen.
+  const page = pageAtRatio(2);
+  assert.equal(page.elements.gameCanvas.style.width, '800px');
+  assert.equal(page.elements.gameCanvas.style.height, '400px');
+});
+
+test('an absurd ratio is capped rather than believed', () => {
+  // Some browsers report one while a page is being zoomed, and a ratio of
+  // three on this board is nine times the fill rate for no visible gain.
+  const page = pageAtRatio(6);
+  assert.equal(page.elements.gameCanvas.width, 1600);
+});
+
+test('a missing or nonsense ratio falls back to one', () => {
+  for (const bad of [undefined, 0, -2, NaN, 'two']) {
+    const page = pageAtRatio(bad);
+    assert.equal(page.elements.gameCanvas.width, 800, `a ratio of ${String(bad)}`);
+  }
+});
+
+test('the context is scaled, so coordinates still mean board units', () => {
+  // Nothing else in the file changes. A draw at x=400 must still land in the
+  // middle of the board, not a quarter of the way across it.
+  const page = pageAtRatio(2);
+  const transforms = page.drawn.filter(([key]) => key === 'setTransform');
+  assert.ok(transforms.length > 0, 'the context was never scaled');
+  assert.deepEqual(transforms[transforms.length - 1][1], [2, 0, 0, 2, 0, 0]);
+});
+
+test('moving to another monitor mid-game is picked up', () => {
+  const page = pageAtRatio(1);
+  assert.equal(page.elements.gameCanvas.width, 800);
+
+  page.sandbox.window.devicePixelRatio = 2;
+  page.frames(2);
+  assert.equal(page.elements.gameCanvas.width, 1600);
+});
+
+test('the field the engine plays on does not change with the screen', () => {
+  // The board is 800x400 whatever the hardware. If the engine saw the backing
+  // store instead, the game would be a different size on a retina screen.
+  const page = pageAtRatio(2).play(200);
+  const arcs = page.drawn.filter(([key]) => key === 'arc');
+  for (const [, args] of arcs) {
+    assert.ok(args[0] >= -20 && args[0] <= 820, `the ball reached x=${args[0]}`);
+    assert.ok(args[1] >= -20 && args[1] <= 420, `the ball reached y=${args[1]}`);
+  }
+});
+
+/* ------------------------------------------------------------- the rally -- */
+
+/** Every string the page has drawn so far. */
+const textsOn = (page) =>
+  page.drawn.filter(([key]) => key === 'fillText').map(([, args]) => String(args[0]));
+
+/** The strings drawn on the most recent frame only. */
+function latestTexts(page) {
+  const before = page.drawn.length;
+  page.frames(1);
+  return page.drawn
+    .slice(before)
+    .filter(([key]) => key === 'fillText')
+    .map(([, args]) => String(args[0]));
+}
+
+test('a short exchange does not put a counter on the board', () => {
+  // A "1" over every serve is noise, and a counter almost always showing its
+  // lowest value reads as broken rather than as quiet.
+  const page = loadPage().frames(90);
+  assert.ok(
+    !latestTexts(page).some((t) => t.startsWith('RALLY')),
+    'a rally was announced before there was one',
+  );
+});
+
+test('a real rally is counted on the board', () => {
+  const page = loadPage().frames(1).play(1200);
+  assert.ok(
+    textsOn(page).some((t) => /^RALLY \d+$/.test(t)),
+    'no rally was ever shown across a whole match',
+  );
+});
+
+test('the best rally of the match is kept on screen', () => {
+  const page = loadPage().frames(1).play(1500);
+  assert.ok(
+    textsOn(page).some((t) => /^BEST \d+$/.test(t)),
+    'the best rally was never shown',
+  );
+});
+
+test('the result screen reports the longest rally', () => {
+  const page = loadPage().frames(1).play(1500).frames(40_000);
+  const texts = latestTexts(page);
+  assert.ok(texts.some((t) => /WIN|GAME OVER/.test(t)), texts.join(' | '));
+  assert.ok(
+    texts.some((t) => /Longest rally: \d+ returns/.test(t)),
+    texts.join(' | '),
+  );
+});
+
+test('a new match starts the counter over', () => {
+  const page = loadPage().frames(1).play(1500).frames(40_000);
+  page.fire('keydown', press(' '));
+  page.frames(1);
+
+  assert.ok(
+    !latestTexts(page).some((t) => /^(RALLY|BEST) \d+$/.test(t)),
+    'the previous match\'s rally survived into the new one',
+  );
+});
+
+/* ------------------------------------------------------------ two players -- */
+
+test('W and S move the right paddle in two-player', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = computerPaddleY(page);
+  page.fire('keydown', press('w'));
+  page.frames(30);
+  assert.ok(computerPaddleY(page) < before, 'W did not move the right paddle up');
+
+  page.fire('keyup', press('w'));
+  const held = computerPaddleY(page);
+  page.frames(30);
+  assert.equal(computerPaddleY(page), held, 'the paddle kept moving after W was released');
+});
+
+test('S moves it the other way', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = computerPaddleY(page);
+  page.fire('keydown', press('s'));
+  page.frames(30);
+  assert.ok(computerPaddleY(page) > before);
+});
+
+test('the case of the key does not matter', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = computerPaddleY(page);
+  page.fire('keydown', press('W'));
+  page.frames(30);
+  assert.ok(computerPaddleY(page) < before, 'a capital W did nothing');
+});
+
+test('W does nothing while the computer has the paddle', () => {
+  // Otherwise a stray keypress fights the computer for its own paddle. The
+  // computer moves on its own, so the test is whether holding W changes
+  // anything: the two runs must trace the same path.
+  const quiet = loadPage().frames(120);
+
+  const pressed = loadPage().frames(1);
+  pressed.fire('keydown', press('w'));
+  pressed.frames(119);
+
+  assert.equal(computerPaddleY(pressed), computerPaddleY(quiet));
+});
+
+test('W and S leave the left paddle alone', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = playerPaddleY(page);
+  page.fire('keydown', press('w'));
+  page.frames(30);
+  assert.equal(playerPaddleY(page), before);
+});
+
+test('switching the right paddle starts a new match', () => {
+  const page = loadPage().frames(400);
+  assert.ok(
+    Number(page.elements.playerScore.textContent) +
+      Number(page.elements.computerScore.textContent) >
+      0,
+    'no point was scored, so this proves nothing',
+  );
+
+  page.chooseMode('human');
+  page.frames(1);
+  assert.equal(page.elements.playerScore.textContent, 0);
+});
+
+test('the difficulty is turned off while a person has the paddle', () => {
+  // It decides nothing in that mode, and a live control that decides nothing
+  // is a question the player has to answer for no reason.
+  const page = loadPage().frames(1);
+  assert.equal(page.difficulty.disabled, false);
+
+  page.chooseMode('human');
+  assert.equal(page.difficulty.disabled, true);
+
+  page.chooseMode('computer');
+  assert.equal(page.difficulty.disabled, false);
+});
+
+test('losing the window drops player two\'s keys as well', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  page.fire('keydown', press('s'));
+  page.frames(10);
+  page.fire('window:blur', {});
+
+  const parked = computerPaddleY(page);
+  page.frames(60);
+  assert.equal(computerPaddleY(page), parked);
+});
+
+/* -------------------------------------------------------- the difficulty -- */
+
+test('the page offers the three levels the engine knows', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const { DIFFICULTY } = require(path.join(ROOT, 'engine.js'));
+  for (const name of Object.keys(DIFFICULTY)) {
+    assert.match(html, new RegExp(`value="${name}"`), `${name} is not offered`);
+  }
+});
+
+test('the select starts on the level the engine defaults to', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const { DEFAULT_DIFFICULTY } = require(path.join(ROOT, 'engine.js'));
+  assert.match(html, new RegExp(`value="${DEFAULT_DIFFICULTY}" selected`));
+});
+
+/** Where the computer's paddle was on the last frame that drew it. */
+function computerPaddleY(page) {
+  const fills = page.drawn.filter(
+    ([key, args]) => key === 'fillRect' && args.length === 4 && args[0] === 775,
+  );
+  assert.ok(fills.length > 0, 'the computer paddle was never drawn');
+  return fills[fills.length - 1][1][1];
+}
+
+test('choosing a level changes how the computer plays', () => {
+  // The levels themselves are tested against the engine, where the ball can
+  // be put where the test wants it. What this checks is that the selection
+  // reaches the engine at all: the same opening, played by two different
+  // opponents, must not trace the same paddle path.
+  const pathOf = (level) => {
+    const page = loadPage().frames(1);
+    page.chooseDifficulty(level);
+
+    const path = [];
+    for (let i = 0; i < 200; i += 1) {
+      page.frames(1);
+      path.push(computerPaddleY(page));
+    }
+    return path;
+  };
+
+  assert.notDeepEqual(pathOf('easy'), pathOf('hard'));
+});
+
+test('changing the opponent starts a new match', () => {
+  // A scoreline half against one opponent and half against another says
+  // nothing about either.
+  const page = loadPage().frames(400);
+  assert.ok(
+    Number(page.elements.playerScore.textContent) +
+      Number(page.elements.computerScore.textContent) >
+      0,
+    'no point was scored, so this proves nothing',
+  );
+
+  page.chooseDifficulty('hard');
+  page.frames(1);
+
+  assert.equal(page.elements.playerScore.textContent, 0);
+  assert.equal(page.elements.computerScore.textContent, 0);
+});
+
+test('the dropdown gives the keyboard back after a choice', () => {
+  // It keeps focus after a click, so a later space or arrow would work the
+  // dropdown instead of the paddle.
+  const page = loadPage().frames(1);
+  page.chooseDifficulty('easy');
+  assert.equal(page.difficulty.blurred, 1);
+});
+
+/* ------------------------------------------------------------- the pause -- */
+
+test('P pauses the game', () => {
+  const page = loadPage().frames(60);
+  const before = ballX(page);
+  page.fire('keydown', press('p'));
+  page.frames(60);
+  assert.equal(ballX(page), before, 'the ball kept moving while paused');
+});
+
+test('Escape pauses it too', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('Escape'));
+  const before = ballX(page);
+  page.frames(60);
+  assert.equal(ballX(page), before);
+});
+
+test('P again carries on', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(10);
+  page.fire('keydown', press('p'));
+  const before = ballX(page);
+  page.frames(60);
+  assert.notEqual(ballX(page), before, 'the ball stayed frozen after resuming');
+});
+
+test('an arrow key resumes, so the way out is the same motion as playing', () => {
+  // Having to find the pause key again before you can move is a worse
+  // interruption than the one being resumed from.
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(10);
+  page.fire('keydown', press('ArrowUp'));
+  const before = ballX(page);
+  page.frames(60);
+  assert.notEqual(ballX(page), before);
+});
+
+test('a paused game still draws', () => {
+  // The overlay is a drawing. Freezing the loop as well as the simulation
+  // would leave whatever was on the canvas when the pause landed.
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  const before = page.drawn.length;
+  page.frames(10);
+  assert.ok(page.drawn.length > before, 'nothing was drawn while paused');
+});
+
+test('losing the window pauses rather than playing on without you', () => {
+  const page = loadPage().frames(60);
+  page.fire('window:blur', {});
+  const before = ballX(page);
+  page.frames(120);
+  assert.equal(ballX(page), before, 'the rally continued after the tab lost focus');
+});
+
+test('coming back does not resume on its own', () => {
+  // A ball already in flight when you look again is how a point is lost to a
+  // tab switch.
+  const page = loadPage().frames(60);
+  page.fire('window:blur', {});
+  page.frames(10);
+  const before = ballX(page);
+  page.frames(120);
+  assert.equal(ballX(page), before);
+});
+
+test('a finished match cannot be paused', () => {
+  const page = loadPage().frames(20_000);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  const drawn = page.drawn.filter(([key]) => key === 'fillText').map(([, args]) => args[0]);
+  assert.ok(drawn.some((t) => /WIN|GAME OVER/.test(t)), drawn.join(' | '));
+  assert.ok(!drawn.includes('PAUSED'), 'the pause overlay was drawn over the result');
+});
+
 /* ------------------------------------------------------------- the touch -- */
 
 test('dragging a finger down the board moves the paddle', () => {
@@ -311,10 +997,13 @@ test('tapping the board restarts a finished match', () => {
 });
 
 test('space does nothing while a match is still being played', () => {
-  const page = loadPage().frames(600);
+  // Long enough for a point, short enough that the match is not already over
+  // — once it is, space restarting it is the correct behaviour and this test
+  // would be measuring that instead.
+  const page = loadPage().frames(400);
   const total = () =>
     Number(page.elements.playerScore.textContent) + Number(page.elements.computerScore.textContent);
-  assert.ok(total() > 0, 'no point was scored in ten seconds, so this proves nothing');
+  assert.ok(total() > 0, 'no point was scored at all, so this proves nothing');
 
   page.fire('keydown', press(' '));
   page.frames(1);
