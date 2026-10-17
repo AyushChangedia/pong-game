@@ -127,6 +127,8 @@
       /** Steps still to wait before the ball is released. */
       serveWait: 0,
       difficulty: DEFAULT_DIFFICULTY,
+      /** Whether the right paddle is a person or the computer. */
+      twoPlayer: false,
       gameOver: false,
       paused: false,
     };
@@ -290,6 +292,16 @@
     return trackTowards(paddle, target, speed, state.field);
   }
 
+  /**
+   * Move the right paddle — by hand in two-player, by computer otherwise.
+   *
+   * One call either way, so the loop does not have to know which mode it is
+   * in and the two cannot get out of step.
+   */
+  function updateOpponent(state, input = {}) {
+    return state.twoPlayer ? updatePlayer(state, input, 'right') : updateAI(state);
+  }
+
   /** Set the computer's difficulty. Unknown names fall back to the default. */
   function setDifficulty(state, name) {
     state.difficulty = DIFFICULTY[name] ? name : DEFAULT_DIFFICULTY;
@@ -307,8 +319,8 @@
    * Keys win over the pointer when both are given, because a key is a
    * deliberate press and a resting pointer is not.
    */
-  function updatePlayer(state, input = {}) {
-    const paddle = state.paddles.left;
+  function updatePlayer(state, input = {}, side = 'left') {
+    const paddle = state.paddles[side];
     const field = state.field;
 
     const up = Boolean(input.up);
@@ -468,6 +480,7 @@
     difficultyOf,
     trackTowards,
     updateAI,
+    updateOpponent,
     setDifficulty,
     updatePlayer,
     isRunning,
