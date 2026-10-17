@@ -49,8 +49,20 @@ function loadPage() {
     addEventListener: listen('canvas:'),
   };
 
+  const mode = {
+    value: 'computer',
+    blurred: 0,
+    blur() {
+      mode.blurred += 1;
+    },
+    addEventListener: (type, fn) => {
+      (listeners[`mode:${type}`] || (listeners[`mode:${type}`] = [])).push({ fn });
+    },
+  };
+
   const difficulty = {
     value: 'normal',
+    disabled: false,
     blurred: 0,
     blur() {
       difficulty.blurred += 1;
@@ -65,6 +77,7 @@ function loadPage() {
     playerScore: { textContent: '' },
     computerScore: { textContent: '' },
     difficulty,
+    mode,
   };
 
   let pending = null;
@@ -124,6 +137,13 @@ function loadPage() {
     registrations(type) {
       return listeners[type] || [];
     },
+    /** Switch the right paddle the way a person would. */
+    chooseMode(value) {
+      mode.value = value;
+      for (const { fn } of listeners['mode:change'] || []) fn({});
+      return page;
+    },
+    mode,
     /** Pick a difficulty the way a person would. */
     chooseDifficulty(value) {
       difficulty.value = value;
@@ -285,6 +305,111 @@ test('time spent away is not played out on the first frame back', () => {
   const before = ballAfter();
   page.gap(30_000, 1);
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
+});
+
+/* ------------------------------------------------------------ two players -- */
+
+test('W and S move the right paddle in two-player', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = computerPaddleY(page);
+  page.fire('keydown', press('w'));
+  page.frames(30);
+  assert.ok(computerPaddleY(page) < before, 'W did not move the right paddle up');
+
+  page.fire('keyup', press('w'));
+  const held = computerPaddleY(page);
+  page.frames(30);
+  assert.equal(computerPaddleY(page), held, 'the paddle kept moving after W was released');
+});
+
+test('S moves it the other way', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = computerPaddleY(page);
+  page.fire('keydown', press('s'));
+  page.frames(30);
+  assert.ok(computerPaddleY(page) > before);
+});
+
+test('the case of the key does not matter', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = computerPaddleY(page);
+  page.fire('keydown', press('W'));
+  page.frames(30);
+  assert.ok(computerPaddleY(page) < before, 'a capital W did nothing');
+});
+
+test('W does nothing while the computer has the paddle', () => {
+  // Otherwise a stray keypress fights the computer for its own paddle. The
+  // computer moves on its own, so the test is whether holding W changes
+  // anything: the two runs must trace the same path.
+  const quiet = loadPage().frames(120);
+
+  const pressed = loadPage().frames(1);
+  pressed.fire('keydown', press('w'));
+  pressed.frames(119);
+
+  assert.equal(computerPaddleY(pressed), computerPaddleY(quiet));
+});
+
+test('W and S leave the left paddle alone', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  const before = playerPaddleY(page);
+  page.fire('keydown', press('w'));
+  page.frames(30);
+  assert.equal(playerPaddleY(page), before);
+});
+
+test('switching the right paddle starts a new match', () => {
+  const page = loadPage().frames(400);
+  assert.ok(
+    Number(page.elements.playerScore.textContent) +
+      Number(page.elements.computerScore.textContent) >
+      0,
+    'no point was scored, so this proves nothing',
+  );
+
+  page.chooseMode('human');
+  page.frames(1);
+  assert.equal(page.elements.playerScore.textContent, 0);
+});
+
+test('the difficulty is turned off while a person has the paddle', () => {
+  // It decides nothing in that mode, and a live control that decides nothing
+  // is a question the player has to answer for no reason.
+  const page = loadPage().frames(1);
+  assert.equal(page.difficulty.disabled, false);
+
+  page.chooseMode('human');
+  assert.equal(page.difficulty.disabled, true);
+
+  page.chooseMode('computer');
+  assert.equal(page.difficulty.disabled, false);
+});
+
+test('losing the window drops player two\'s keys as well', () => {
+  const page = loadPage().frames(1);
+  page.chooseMode('human');
+  page.frames(1);
+
+  page.fire('keydown', press('s'));
+  page.frames(10);
+  page.fire('window:blur', {});
+
+  const parked = computerPaddleY(page);
+  page.frames(60);
+  assert.equal(computerPaddleY(page), parked);
 });
 
 /* -------------------------------------------------------- the difficulty -- */

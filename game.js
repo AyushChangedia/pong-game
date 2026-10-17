@@ -14,8 +14,8 @@ const ctx = canvas.getContext('2d');
 const {
   createState,
   resetMatch,
-  updateAI,
   updatePlayer,
+  updateOpponent,
   isRunning,
   setDifficulty,
   setPaused,
@@ -29,7 +29,27 @@ const state = createState({ width: canvas.width, height: canvas.height });
 
 /* ------------------------------------------------------------- settings -- */
 
+const modeSelect = document.getElementById('mode');
 const difficultySelect = document.getElementById('difficulty');
+
+/** The difficulty only means anything while the computer is playing. */
+function syncDifficultyAvailability() {
+  if (difficultySelect) difficultySelect.disabled = state.twoPlayer;
+}
+
+if (modeSelect) {
+  state.twoPlayer = modeSelect.value === 'human';
+  syncDifficultyAvailability();
+
+  modeSelect.addEventListener('change', () => {
+    state.twoPlayer = modeSelect.value === 'human';
+    syncDifficultyAvailability();
+    // Half a match against the computer and half against a person is not a
+    // result either of them earned.
+    resetMatch(state);
+    modeSelect.blur();
+  });
+}
 
 if (difficultySelect) {
   // The engine decides what the name means, including that an unrecognised
@@ -60,6 +80,11 @@ const input = {
   pointer: true,
 };
 
+// Player two, on W and S. No pointer: one mouse cannot drive two paddles, and
+// leaving `pointer` true here would drag the right paddle to the cursor the
+// first player is using.
+const opponentInput = { up: false, down: false, pointer: false };
+
 document.addEventListener('keydown', (e) => {
   if (state.gameOver && (e.key === ' ' || e.key === 'Enter')) {
     e.preventDefault();
@@ -87,12 +112,26 @@ document.addEventListener('keydown', (e) => {
     input.pointer = false;
     if (e.key === 'ArrowUp') input.up = true;
     else input.down = true;
+    return;
+  }
+
+  // W and S, whichever case the caps lock happens to be in.
+  const key = e.key.toLowerCase();
+  if (key === 'w' || key === 's') {
+    e.preventDefault();
+    if (state.paused) setPaused(state, false);
+    if (key === 'w') opponentInput.up = true;
+    else opponentInput.down = true;
   }
 });
 
 document.addEventListener('keyup', (e) => {
   if (e.key === 'ArrowUp') input.up = false;
   if (e.key === 'ArrowDown') input.down = false;
+
+  const key = e.key.toLowerCase();
+  if (key === 'w') opponentInput.up = false;
+  if (key === 's') opponentInput.down = false;
 });
 
 /**
@@ -241,6 +280,8 @@ let carry = 0;
 function standDown() {
   input.up = false;
   input.down = false;
+  opponentInput.up = false;
+  opponentInput.down = false;
   lastFrame = null;
   carry = 0;
   // Losing the window mid-rally is exactly the situation pausing exists for.
@@ -263,7 +304,7 @@ function gameLoop(now) {
     carry = plan.carry;
     for (let i = 0; i < plan.steps; i += 1) {
       updatePlayer(state, input);
-      updateAI(state);
+      updateOpponent(state, opponentInput);
       stepBall(state);
     }
   }

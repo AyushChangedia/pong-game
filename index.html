@@ -21,7 +21,13 @@
         </div>
         
         <div class="settings">
-            <label for="difficulty">Computer</label>
+            <label for="mode">Right paddle</label>
+            <select id="mode">
+                <option value="computer" selected>Computer</option>
+                <option value="human">Player 2</option>
+            </select>
+
+            <label for="difficulty">Difficulty</label>
             <select id="difficulty">
                 <option value="easy">Easy</option>
                 <option value="normal" selected>Normal</option>
@@ -35,7 +41,7 @@
             <p><strong>Controls:</strong></p>
             <p>🖱️ Move Mouse | ⬆️ ⬇️ Arrow Keys | 👆 Drag on the board</p>
             <p>⏸️ <strong>P</strong> or <strong>Esc</strong> to pause</p>
-            <p>Computer controls the right paddle</p>
+            <p>Player 2: <strong>W</strong> / <strong>S</strong> — switch the right paddle above</p>
             <p><strong>First to 5 points wins!</strong> Press Space — or tap the board — to play again.</p>
         </div>
     </div>
