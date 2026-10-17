@@ -11,6 +11,48 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+/**
+ * The field, in the units everything else is written in.
+ *
+ * Read once, before the backing store is resized, because that resize changes
+ * canvas.width — and every coordinate in this file, and the whole engine,
+ * means "units of the 800x400 board" rather than "device pixels".
+ */
+const FIELD = { width: canvas.width, height: canvas.height };
+
+/**
+ * Match the canvas's backing store to the screen it is on.
+ *
+ * A canvas has two sizes: the buffer it draws into and the box CSS gives it.
+ * They were the same number, so on any display with a pixel ratio above one —
+ * which is every phone and most laptops — the browser took an 800x400 image
+ * and scaled it up. The ball had soft edges and the dashed centre line
+ * shimmered, on hardware with the pixels to draw both exactly.
+ *
+ * The buffer is sized in device pixels and the context scaled by the same
+ * factor, so nothing else has to change: a draw at x=400 still lands in the
+ * middle of the board.
+ */
+function matchPixelRatio() {
+  const ratio = window.devicePixelRatio;
+  // Capped: a ratio of 3 on a large board is nine times the fill rate for a
+  // difference nobody can see, and some browsers report absurd values while
+  // a page is being zoomed.
+  const scale = Number.isFinite(ratio) && ratio > 0 ? Math.min(ratio, 2) : 1;
+
+  const wanted = { width: Math.round(FIELD.width * scale), height: Math.round(FIELD.height * scale) };
+  if (canvas.width === wanted.width && canvas.height === wanted.height) return scale;
+
+  canvas.width = wanted.width;
+  canvas.height = wanted.height;
+  // The CSS box stays in layout pixels, or the board grows on a retina screen.
+  canvas.style.width = `${FIELD.width}px`;
+  canvas.style.height = `${FIELD.height}px`;
+  return scale;
+}
+
+matchPixelRatio();
+
 const {
   createState,
   resetMatch,
@@ -25,7 +67,7 @@ const {
   winner,
 } = window.ENGINE;
 
-const state = createState({ width: canvas.width, height: canvas.height });
+const state = createState({ width: FIELD.width, height: FIELD.height });
 
 /** Below this an exchange is not a rally, it is just play. */
 const RALLY_WORTH_SHOWING = 3;
@@ -76,7 +118,7 @@ if (difficultySelect) {
 const input = {
   up: false,
   down: false,
-  pointerY: canvas.height / 2,
+  pointerY: FIELD.height / 2,
   // Whichever device was used last owns the paddle. Without this the pointer
   // drags the paddle back to the resting cursor every frame, and the arrow
   // keys appear to do nothing.
@@ -148,7 +190,7 @@ document.addEventListener('keyup', (e) => {
 function aimAt(clientY) {
   const rect = canvas.getBoundingClientRect();
   if (!rect.height) return;
-  input.pointerY = (clientY - rect.top) * (canvas.height / rect.height);
+  input.pointerY = (clientY - rect.top) * (FIELD.height / rect.height);
   input.pointer = true;
 }
 
@@ -204,33 +246,33 @@ function drawCenterLine() {
   ctx.setLineDash([10, 10]);
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(canvas.width / 2, 0);
-  ctx.lineTo(canvas.width / 2, canvas.height);
+  ctx.moveTo(FIELD.width / 2, 0);
+  ctx.lineTo(FIELD.width / 2, FIELD.height);
   ctx.stroke();
   ctx.setLineDash([]);
 }
 
 function drawResult(who) {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, FIELD.width, FIELD.height);
   ctx.fillStyle = who === 'player' ? '#00ff88' : '#ff006e';
   ctx.font = 'bold 48px Arial';
   ctx.textAlign = 'center';
   ctx.fillText(
     who === 'player' ? 'YOU WIN!' : 'GAME OVER!',
-    canvas.width / 2,
-    canvas.height / 2,
+    FIELD.width / 2,
+    FIELD.height / 2,
   );
   ctx.font = '20px Arial';
-  ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
+  ctx.fillText('Press Space to play again', FIELD.width / 2, FIELD.height / 2 + 50);
 
   if (state.longestRally >= RALLY_WORTH_SHOWING) {
     ctx.font = '16px Arial';
     ctx.fillStyle = '#9a9a9a';
     ctx.fillText(
       `Longest rally: ${state.longestRally} returns`,
-      canvas.width / 2,
-      canvas.height / 2 + 85,
+      FIELD.width / 2,
+      FIELD.height / 2 + 85,
     );
   }
 }
@@ -239,17 +281,17 @@ function drawPaused() {
   // Lighter than the result overlay: the board underneath is still the thing
   // being looked at, and a rally frozen mid-flight is worth seeing.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, FIELD.width, FIELD.height);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 40px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
+  ctx.fillText('PAUSED', FIELD.width / 2, FIELD.height / 2);
   ctx.font = '18px Arial';
   ctx.fillStyle = '#00ff88';
   ctx.fillText(
     'Press P, Escape or an arrow key to carry on',
-    canvas.width / 2,
-    canvas.height / 2 + 40,
+    FIELD.width / 2,
+    FIELD.height / 2 + 40,
   );
 }
 
@@ -268,18 +310,23 @@ function drawRally() {
   ctx.textAlign = 'center';
   ctx.font = 'bold 22px Arial';
   ctx.fillStyle = showing ? '#00ff88' : '#4a4a4a';
-  ctx.fillText(showing ? `RALLY ${state.rally}` : `BEST ${state.longestRally}`, canvas.width / 2, 34);
+  ctx.fillText(showing ? `RALLY ${state.rally}` : `BEST ${state.longestRally}`, FIELD.width / 2, 34);
 
   if (showing && best) {
     ctx.font = '13px Arial';
     ctx.fillStyle = '#6a6a6a';
-    ctx.fillText(`BEST ${state.longestRally}`, canvas.width / 2, 54);
+    ctx.fillText(`BEST ${state.longestRally}`, FIELD.width / 2, 54);
   }
 }
 
 function draw() {
+  // The ratio can change while the page is open: a window dragged to another
+  // monitor, or the browser zoomed.
+  const scale = matchPixelRatio();
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
   ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, FIELD.width, FIELD.height);
 
   drawCenterLine();
   drawPaddle(state.paddles.left);

@@ -44,6 +44,7 @@ function loadPage() {
   const canvas = {
     width: 800,
     height: 400,
+    style: {},
     getContext: () => ctx,
     getBoundingClientRect: () => ({ top: 0, left: 0, height: 400, width: 800 }),
     addEventListener: listen('canvas:'),
@@ -83,7 +84,7 @@ function loadPage() {
   let pending = null;
 
   const sandbox = {
-    window: { addEventListener: listen('window:') },
+    window: { addEventListener: listen('window:'), devicePixelRatio: 1 },
     document: {
       getElementById: (id) => elements[id],
       addEventListener: listen(''),
@@ -205,7 +206,8 @@ test('only the engine is published to the window', () => {
   // is what keeps them from colliding in the first place.
   const { sandbox } = loadPage();
   assert.equal(typeof sandbox.window.ENGINE, 'object');
-  const added = Object.keys(sandbox.window).filter((key) => key !== 'addEventListener');
+  const harness = new Set(['addEventListener', 'devicePixelRatio']);
+  const added = Object.keys(sandbox.window).filter((key) => !harness.has(key));
   assert.deepEqual(added, ['ENGINE']);
 });
 
@@ -323,6 +325,81 @@ test('time spent away is not played out on the first frame back', () => {
   const before = ballAfter();
   page.gap(30_000, 1);
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
+});
+
+/* -------------------------------------------------------- the pixel ratio -- */
+
+/** A page whose screen reports the given device pixel ratio. */
+function pageAtRatio(ratio) {
+  const page = loadPage();
+  page.sandbox.window.devicePixelRatio = ratio;
+  return page.frames(2);
+}
+
+test('on an ordinary screen the buffer is the board', () => {
+  const page = pageAtRatio(1);
+  assert.equal(page.elements.gameCanvas.width, 800);
+  assert.equal(page.elements.gameCanvas.height, 400);
+});
+
+test('on a retina screen the buffer is drawn at the real pixels', () => {
+  // The buffer and the CSS box were the same number, so the browser took an
+  // 800x400 image and scaled it up: soft edges on the ball and a centre line
+  // that shimmered, on hardware with the pixels to draw both exactly.
+  const page = pageAtRatio(2);
+  assert.equal(page.elements.gameCanvas.width, 1600);
+  assert.equal(page.elements.gameCanvas.height, 800);
+});
+
+test('the board stays the same size on the page', () => {
+  // Only the buffer grows. Sizing the CSS box too would make the board twice
+  // as big on a retina screen.
+  const page = pageAtRatio(2);
+  assert.equal(page.elements.gameCanvas.style.width, '800px');
+  assert.equal(page.elements.gameCanvas.style.height, '400px');
+});
+
+test('an absurd ratio is capped rather than believed', () => {
+  // Some browsers report one while a page is being zoomed, and a ratio of
+  // three on this board is nine times the fill rate for no visible gain.
+  const page = pageAtRatio(6);
+  assert.equal(page.elements.gameCanvas.width, 1600);
+});
+
+test('a missing or nonsense ratio falls back to one', () => {
+  for (const bad of [undefined, 0, -2, NaN, 'two']) {
+    const page = pageAtRatio(bad);
+    assert.equal(page.elements.gameCanvas.width, 800, `a ratio of ${String(bad)}`);
+  }
+});
+
+test('the context is scaled, so coordinates still mean board units', () => {
+  // Nothing else in the file changes. A draw at x=400 must still land in the
+  // middle of the board, not a quarter of the way across it.
+  const page = pageAtRatio(2);
+  const transforms = page.drawn.filter(([key]) => key === 'setTransform');
+  assert.ok(transforms.length > 0, 'the context was never scaled');
+  assert.deepEqual(transforms[transforms.length - 1][1], [2, 0, 0, 2, 0, 0]);
+});
+
+test('moving to another monitor mid-game is picked up', () => {
+  const page = pageAtRatio(1);
+  assert.equal(page.elements.gameCanvas.width, 800);
+
+  page.sandbox.window.devicePixelRatio = 2;
+  page.frames(2);
+  assert.equal(page.elements.gameCanvas.width, 1600);
+});
+
+test('the field the engine plays on does not change with the screen', () => {
+  // The board is 800x400 whatever the hardware. If the engine saw the backing
+  // store instead, the game would be a different size on a retina screen.
+  const page = pageAtRatio(2).play(200);
+  const arcs = page.drawn.filter(([key]) => key === 'arc');
+  for (const [, args] of arcs) {
+    assert.ok(args[0] >= -20 && args[0] <= 820, `the ball reached x=${args[0]}`);
+    assert.ok(args[1] >= -20 && args[1] <= 420, `the ball reached y=${args[1]}`);
+  }
 });
 
 /* ------------------------------------------------------------- the rally -- */
