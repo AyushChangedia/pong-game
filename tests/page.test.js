@@ -49,10 +49,22 @@ function loadPage() {
     addEventListener: listen('canvas:'),
   };
 
+  const difficulty = {
+    value: 'normal',
+    blurred: 0,
+    blur() {
+      difficulty.blurred += 1;
+    },
+    addEventListener: (type, fn) => {
+      (listeners[`difficulty:${type}`] || (listeners[`difficulty:${type}`] = [])).push({ fn });
+    },
+  };
+
   const elements = {
     gameCanvas: canvas,
     playerScore: { textContent: '' },
     computerScore: { textContent: '' },
+    difficulty,
   };
 
   let pending = null;
@@ -112,6 +124,13 @@ function loadPage() {
     registrations(type) {
       return listeners[type] || [];
     },
+    /** Pick a difficulty the way a person would. */
+    chooseDifficulty(value) {
+      difficulty.value = value;
+      for (const { fn } of listeners['difficulty:change'] || []) fn({});
+      return page;
+    },
+    difficulty,
     /** Run `count` frames as if the clock had jumped by `gapMs` first. */
     gap(gapMs, count = 1) {
       clock += gapMs;
@@ -268,6 +287,79 @@ test('time spent away is not played out on the first frame back', () => {
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
 });
 
+/* -------------------------------------------------------- the difficulty -- */
+
+test('the page offers the three levels the engine knows', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const { DIFFICULTY } = require(path.join(ROOT, 'engine.js'));
+  for (const name of Object.keys(DIFFICULTY)) {
+    assert.match(html, new RegExp(`value="${name}"`), `${name} is not offered`);
+  }
+});
+
+test('the select starts on the level the engine defaults to', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const { DEFAULT_DIFFICULTY } = require(path.join(ROOT, 'engine.js'));
+  assert.match(html, new RegExp(`value="${DEFAULT_DIFFICULTY}" selected`));
+});
+
+/** Where the computer's paddle was on the last frame that drew it. */
+function computerPaddleY(page) {
+  const fills = page.drawn.filter(
+    ([key, args]) => key === 'fillRect' && args.length === 4 && args[0] === 775,
+  );
+  assert.ok(fills.length > 0, 'the computer paddle was never drawn');
+  return fills[fills.length - 1][1][1];
+}
+
+test('choosing a level changes how the computer plays', () => {
+  const travelled = (level) => {
+    const page = loadPage().frames(1);
+    page.chooseDifficulty(level);
+    page.frames(1);
+
+    let last = computerPaddleY(page);
+    let total = 0;
+    for (let i = 0; i < 400; i += 1) {
+      page.frames(1);
+      const now = computerPaddleY(page);
+      total += Math.abs(now - last);
+      last = now;
+    }
+    return total;
+  };
+
+  const easy = travelled('easy');
+  const hard = travelled('hard');
+  assert.ok(hard > easy, `hard travelled ${hard}, easy travelled ${easy}`);
+});
+
+test('changing the opponent starts a new match', () => {
+  // A scoreline half against one opponent and half against another says
+  // nothing about either.
+  const page = loadPage().frames(400);
+  assert.ok(
+    Number(page.elements.playerScore.textContent) +
+      Number(page.elements.computerScore.textContent) >
+      0,
+    'no point was scored, so this proves nothing',
+  );
+
+  page.chooseDifficulty('hard');
+  page.frames(1);
+
+  assert.equal(page.elements.playerScore.textContent, 0);
+  assert.equal(page.elements.computerScore.textContent, 0);
+});
+
+test('the dropdown gives the keyboard back after a choice', () => {
+  // It keeps focus after a click, so a later space or arrow would work the
+  // dropdown instead of the paddle.
+  const page = loadPage().frames(1);
+  page.chooseDifficulty('easy');
+  assert.equal(page.difficulty.blurred, 1);
+});
+
 /* ------------------------------------------------------------- the pause -- */
 
 test('P pauses the game', () => {
@@ -396,9 +488,10 @@ test('tapping the board restarts a finished match', () => {
 });
 
 test('space does nothing while a match is still being played', () => {
-  // Long enough for a point: the ball speeds up over a rally, so the opening
-  // exchanges of a match are the slow ones.
-  const page = loadPage().frames(900);
+  // Long enough for a point, short enough that the match is not already over
+  // — once it is, space restarting it is the correct behaviour and this test
+  // would be measuring that instead.
+  const page = loadPage().frames(400);
   const total = () =>
     Number(page.elements.playerScore.textContent) + Number(page.elements.computerScore.textContent);
   assert.ok(total() > 0, 'no point was scored at all, so this proves nothing');

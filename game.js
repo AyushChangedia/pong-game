@@ -17,6 +17,7 @@ const {
   updateAI,
   updatePlayer,
   isRunning,
+  setDifficulty,
   setPaused,
   togglePause,
   planSteps,
@@ -25,6 +26,26 @@ const {
 } = window.ENGINE;
 
 const state = createState({ width: canvas.width, height: canvas.height });
+
+/* ------------------------------------------------------------- settings -- */
+
+const difficultySelect = document.getElementById('difficulty');
+
+if (difficultySelect) {
+  // The engine decides what the name means, including that an unrecognised
+  // one falls back — so the select is read, not trusted.
+  setDifficulty(state, difficultySelect.value);
+
+  difficultySelect.addEventListener('change', () => {
+    setDifficulty(state, difficultySelect.value);
+    // Changing the opponent mid-match would leave a scoreline half of each,
+    // which says nothing about either. Start again.
+    resetMatch(state);
+    // The select keeps focus after a click, so a later space or arrow key
+    // would work the dropdown instead of the paddle.
+    difficultySelect.blur();
+  });
+}
 
 /* ---------------------------------------------------------------- input -- */
 
