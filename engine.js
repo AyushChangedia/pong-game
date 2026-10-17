@@ -395,15 +395,27 @@
    * Advance one step: move the ball, bounce it, award a point if it left.
    * Returns 'player', 'computer' or null depending on who scored.
    */
+  /**
+   * Advance one step and say what happened in it.
+   *
+   * The return value used to be the scorer or null, which told a caller about
+   * the rarest event in the game and nothing about the common ones. A step
+   * that bounces off a paddle looks, from outside, exactly like a step in
+   * which the ball simply moved — so anything wanting to react to a bounce
+   * had to re-derive it, by watching dx for a sign change and guessing.
+   *
+   * @returns {{scorer: ?string, hitPaddle: ?string, hitWall: boolean}}
+   */
   function stepBall(state, random = Math.random) {
     const { ball, field } = state;
+    const events = { scorer: null, hitPaddle: null, hitWall: false };
 
     // Waiting to serve. The ball sits at the centre line, already pointed the
     // way it is going to go, and nothing else in the step runs — a ball that
     // cannot move also cannot bounce or score.
     if (state.serveWait > 0) {
       state.serveWait -= 1;
-      return null;
+      return events;
     }
 
     ball.x += ball.dx;
@@ -413,14 +425,17 @@
     if (ball.y - ball.size < 0 || ball.y + ball.size > field.height) {
       ball.dy = Math.abs(ball.dy) * (ball.y - ball.size < 0 ? 1 : -1);
       ball.y = clamp(ball.y, ball.size, field.height - ball.size);
+      events.hitWall = true;
     }
 
-    bounceOffPaddle(state, 'left');
-    bounceOffPaddle(state, 'right');
+    if (bounceOffPaddle(state, 'left')) events.hitPaddle = 'left';
+    else if (bounceOffPaddle(state, 'right')) events.hitPaddle = 'right';
 
     let scorer = null;
     if (ball.x + ball.size < 0) scorer = 'computer';
     else if (ball.x - ball.size > field.width) scorer = 'player';
+
+    events.scorer = scorer;
 
     if (scorer) {
       state.score[scorer] += 1;
@@ -437,7 +452,7 @@
       }
     }
 
-    return scorer;
+    return events;
   }
 
   /**

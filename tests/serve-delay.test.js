@@ -79,7 +79,7 @@ test('nothing can be scored while the ball is waiting', () => {
   stepBall(state, fixed(0.5));
 
   for (let i = 0; i < RULES.serveDelaySteps; i += 1) {
-    assert.equal(stepBall(state, fixed(0.5)), null, `a point was scored at step ${i}`);
+    assert.equal(stepBall(state, fixed(0.5)).scorer, null, `a point was scored at step ${i}`);
   }
   assert.equal(state.score.player + state.score.computer, 1);
 });
