@@ -438,25 +438,23 @@ function computerPaddleY(page) {
 }
 
 test('choosing a level changes how the computer plays', () => {
-  const travelled = (level) => {
+  // The levels themselves are tested against the engine, where the ball can
+  // be put where the test wants it. What this checks is that the selection
+  // reaches the engine at all: the same opening, played by two different
+  // opponents, must not trace the same paddle path.
+  const pathOf = (level) => {
     const page = loadPage().frames(1);
     page.chooseDifficulty(level);
-    page.frames(1);
 
-    let last = computerPaddleY(page);
-    let total = 0;
-    for (let i = 0; i < 400; i += 1) {
+    const path = [];
+    for (let i = 0; i < 200; i += 1) {
       page.frames(1);
-      const now = computerPaddleY(page);
-      total += Math.abs(now - last);
-      last = now;
+      path.push(computerPaddleY(page));
     }
-    return total;
+    return path;
   };
 
-  const easy = travelled('easy');
-  const hard = travelled('hard');
-  assert.ok(hard > easy, `hard travelled ${hard}, easy travelled ${easy}`);
+  assert.notDeepEqual(pathOf('easy'), pathOf('hard'));
 });
 
 test('changing the opponent starts a new match', () => {

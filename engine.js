@@ -124,6 +124,8 @@
       score: { player: 0, computer: 0 },
       /** Returns in the current rally. Resets on every serve. */
       rally: 0,
+      /** The best rally of the match so far. Survives every serve. */
+      longestRally: 0,
       /** Steps still to wait before the ball is released. */
       serveWait: 0,
       difficulty: DEFAULT_DIFFICULTY,
@@ -185,6 +187,12 @@
         : paddle.x - ball.size;
 
     state.rally += 1;
+    // Recorded as it happens, not when the rally ends. A rally that is still
+    // running is already the longest one if it has gone on long enough, and
+    // counting it only at the end would leave the display a beat behind the
+    // thing it is describing.
+    if (state.rally > state.longestRally) state.longestRally = state.rally;
+
     ball.dx *= RULES.rallySpeedUp;
     ball.dy *= RULES.rallySpeedUp;
 
@@ -252,6 +260,8 @@
   function resetMatch(state, random = Math.random) {
     state.score.player = 0;
     state.score.computer = 0;
+    // The best rally belongs to the match that produced it.
+    state.longestRally = 0;
     state.paddles.left.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.paddles.right.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.gameOver = false;

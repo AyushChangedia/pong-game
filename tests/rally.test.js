@@ -150,3 +150,86 @@ test('a long rally never stops crossing the field', () => {
     );
   }
 });
+
+/* ---------------------------------------------------- the longest rally -- */
+
+/** Return the ball off `side` once, from the middle of that paddle. */
+function returnOff(state, side) {
+  const paddle = state.paddles[side];
+  state.ball.x = side === 'left' ? paddle.x + paddle.width : paddle.x;
+  state.ball.y = paddle.y + paddle.height / 2;
+  state.ball.dx = side === 'left' ? -Math.abs(state.ball.dx) : Math.abs(state.ball.dx);
+  bounceOffPaddle(state, side);
+  return state;
+}
+
+test('a new match has no best rally yet', () => {
+  assert.equal(createState().longestRally, 0);
+});
+
+test('the best rally tracks the current one while it is the best', () => {
+  // Counted as it happens rather than when the rally ends: a rally still
+  // running is already the longest if it has gone on long enough, and
+  // recording it at the end would leave the display a beat behind.
+  const state = createState();
+  for (let i = 0; i < 5; i += 1) {
+    returnOff(state, i % 2 === 0 ? 'left' : 'right');
+    assert.equal(state.longestRally, state.rally, `after return ${i}`);
+  }
+});
+
+test('a shorter rally does not overwrite a longer one', () => {
+  const state = createState();
+  for (let i = 0; i < 7; i += 1) returnOff(state, i % 2 === 0 ? 'left' : 'right');
+  assert.equal(state.longestRally, 7);
+
+  serve(state, () => 0.5);
+  assert.equal(state.rally, 0);
+  assert.equal(state.longestRally, 7, 'the serve wiped the record');
+
+  returnOff(state, 'left');
+  returnOff(state, 'right');
+  assert.equal(state.rally, 2);
+  assert.equal(state.longestRally, 7);
+});
+
+test('a longer rally takes the record', () => {
+  const state = createState();
+  for (let i = 0; i < 3; i += 1) returnOff(state, i % 2 === 0 ? 'left' : 'right');
+  serve(state, () => 0.5);
+  for (let i = 0; i < 9; i += 1) returnOff(state, i % 2 === 0 ? 'left' : 'right');
+  assert.equal(state.longestRally, 9);
+});
+
+test('the record belongs to the match that produced it', () => {
+  const state = createState();
+  for (let i = 0; i < 6; i += 1) returnOff(state, i % 2 === 0 ? 'left' : 'right');
+  assert.equal(state.longestRally, 6);
+
+  E.resetMatch(state, () => 0.5);
+  assert.equal(state.longestRally, 0);
+  assert.equal(state.rally, 0);
+});
+
+test('a point does not reset the record', () => {
+  const state = createState();
+  for (let i = 0; i < 4; i += 1) returnOff(state, i % 2 === 0 ? 'left' : 'right');
+
+  state.ball.x = state.field.width + state.ball.size + 1;
+  state.ball.dx = 5;
+  E.stepBall(state, () => 0.5);
+
+  assert.equal(state.score.player, 1);
+  assert.equal(state.longestRally, 4);
+});
+
+test('the record is never below the rally in progress', () => {
+  const state = createState();
+  for (let i = 0; i < 40; i += 1) {
+    returnOff(state, i % 2 === 0 ? 'left' : 'right');
+    assert.ok(
+      state.longestRally >= state.rally,
+      `rally ${state.rally} beat the record of ${state.longestRally}`,
+    );
+  }
+});
