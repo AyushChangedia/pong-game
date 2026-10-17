@@ -64,6 +64,7 @@
       },
       score: { player: 0, computer: 0 },
       gameOver: false,
+      paused: false,
     };
   }
 
@@ -148,6 +149,7 @@
     state.paddles.left.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.paddles.right.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.gameOver = false;
+    state.paused = false;
     return serve(state, random);
   }
 
@@ -270,6 +272,31 @@
     return scorer;
   }
 
+  /**
+   * Whether the simulation should advance this step.
+   *
+   * Three things stop it, and they are not the same thing. A finished match is
+   * over and stays over. A paused match is waiting for the player to come
+   * back. Both still draw — the result screen and the pause overlay are
+   * drawings — so this is deliberately not "should we render".
+   */
+  function isRunning(state) {
+    return !state.gameOver && !state.paused;
+  }
+
+  /** Pause, resume, or flip. Does nothing to a match that has already ended. */
+  function setPaused(state, paused) {
+    // Pausing a finished match would leave a pause overlay over the result,
+    // and resuming it would have nothing to resume.
+    if (state.gameOver) return false;
+    state.paused = Boolean(paused);
+    return state.paused;
+  }
+
+  function togglePause(state) {
+    return setPaused(state, !state.paused);
+  }
+
   /** Who has won, or null while the match is still on. */
   function winner(state) {
     if (state.score.player >= RULES.winScore) return 'player';
@@ -292,6 +319,9 @@
     trackTowards,
     updateAI,
     updatePlayer,
+    isRunning,
+    setPaused,
+    togglePause,
     planSteps,
     stepBall,
     winner,
