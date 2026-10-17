@@ -55,6 +55,16 @@
      * dx means the ball is always on its way somewhere.
      */
     minHorizontalSpeed: 2,
+    /**
+     * Steps the ball waits at the centre line before a serve goes.
+     *
+     * Sixty, so one second. A point used to end and the next one begin in the
+     * same frame: the ball vanished off one edge and was already travelling
+     * from the middle before anybody had registered the first thing. A beat
+     * to see the score change is the difference between a rally ending and a
+     * rally being interrupted.
+     */
+    serveDelaySteps: 60,
   };
 
   function createState(field = FIELD) {
@@ -84,6 +94,8 @@
       score: { player: 0, computer: 0 },
       /** Returns in the current rally. Resets on every serve. */
       rally: 0,
+      /** Steps still to wait before the ball is released. */
+      serveWait: 0,
       gameOver: false,
       paused: false,
     };
@@ -188,9 +200,10 @@
    *   should not also mean watching three serves fly away from you. With
    *   nobody named — the opening serve — the coin decides.
    */
-  function serve(state, random = Math.random, towards = null) {
+  function serve(state, random = Math.random, towards = null, delay = 0) {
     const ball = state.ball;
     state.rally = 0;
+    state.serveWait = Math.max(0, Math.round(delay) || 0);
     ball.x = state.field.width / 2;
     ball.y = state.field.height / 2;
 
@@ -210,7 +223,7 @@
     state.paddles.right.y = state.field.height / 2 - RULES.paddleHeight / 2;
     state.gameOver = false;
     state.paused = false;
-    return serve(state, random);
+    return serve(state, random, null, RULES.serveDelaySteps);
   }
 
   /** Move a paddle towards a target, at its own speed, with a dead zone. */
@@ -307,6 +320,14 @@
   function stepBall(state, random = Math.random) {
     const { ball, field } = state;
 
+    // Waiting to serve. The ball sits at the centre line, already pointed the
+    // way it is going to go, and nothing else in the step runs — a ball that
+    // cannot move also cannot bounce or score.
+    if (state.serveWait > 0) {
+      state.serveWait -= 1;
+      return null;
+    }
+
     ball.x += ball.dx;
     ball.y += ball.dy;
 
@@ -328,7 +349,14 @@
       if (state.score[scorer] >= RULES.winScore) state.gameOver = true;
       // The one who conceded receives. `scorer` is who won the point, so the
       // ball goes to the other side.
-      else serve(state, random, scorer === 'player' ? 'computer' : 'player');
+      else {
+        serve(
+          state,
+          random,
+          scorer === 'player' ? 'computer' : 'player',
+          RULES.serveDelaySteps,
+        );
+      }
     }
 
     return scorer;
