@@ -67,6 +67,36 @@
     serveDelaySteps: 60,
   };
 
+  /**
+   * How good the computer is, and in what way.
+   *
+   * Speed alone is a poor difficulty knob. A paddle that tracks the ball
+   * perfectly and only moves slowly is not an easier opponent so much as a
+   * differently-shaped wall: it never misreads anything, so the only way past
+   * it is to out-run it. These three differ in how well the computer reads
+   * the ball as well as how fast it can act on that reading.
+   *
+   * `aim` is how far off-centre of the ball it tries to be, as a fraction of
+   * the paddle's own height — a steady misjudgement, not a jitter, so the
+   * same shot is misread the same way and the player can learn it.
+   *
+   * `reach` is how far up the field it starts tracking, as a fraction of the
+   * width. Below it the computer waits in place, which is what makes an easy
+   * opponent beatable by a shot played early rather than only by a fast one.
+   */
+  const DIFFICULTY = {
+    easy: { speed: 3.5, aim: 0.45, reach: 0.45 },
+    normal: { speed: 5, aim: 0.2, reach: 0.75 },
+    hard: { speed: 7, aim: 0, reach: 1 },
+  };
+
+  const DEFAULT_DIFFICULTY = 'normal';
+
+  /** The named settings, or the default for anything unrecognised. */
+  function difficultyOf(name) {
+    return DIFFICULTY[name] || DIFFICULTY[DEFAULT_DIFFICULTY];
+  }
+
   function createState(field = FIELD) {
     return {
       field: { ...field },
@@ -96,6 +126,7 @@
       rally: 0,
       /** Steps still to wait before the ball is released. */
       serveWait: 0,
+      difficulty: DEFAULT_DIFFICULTY,
       gameOver: false,
       paused: false,
     };
@@ -235,9 +266,34 @@
     return clampPaddle(paddle, field);
   }
 
-  /** The computer follows the ball. */
+  /**
+   * The computer follows the ball — as well as its difficulty lets it.
+   *
+   * Three things vary: how fast it can move, how far up the field it bothers
+   * to react, and how badly it reads where the ball is going. The misread is
+   * a fixed offset rather than a random one, so the same shot fools it the
+   * same way twice and a player can learn to play it.
+   */
   function updateAI(state) {
-    return trackTowards(state.paddles.right, state.ball.y, RULES.aiSpeed, state.field);
+    const paddle = state.paddles.right;
+    const { speed, aim, reach } = difficultyOf(state.difficulty);
+
+    // How far across the field the ball has come, from 0 at the left edge.
+    const progress = state.ball.x / state.field.width;
+    if (progress < 1 - reach) return clampPaddle(paddle, state.field);
+
+    // Lean the wrong way by a fraction of the paddle, and pick the side by
+    // where the ball actually is, so it misjudges away from the middle.
+    const away = state.ball.y < state.field.height / 2 ? -1 : 1;
+    const target = state.ball.y + away * aim * paddle.height;
+
+    return trackTowards(paddle, target, speed, state.field);
+  }
+
+  /** Set the computer's difficulty. Unknown names fall back to the default. */
+  function setDifficulty(state, name) {
+    state.difficulty = DIFFICULTY[name] ? name : DEFAULT_DIFFICULTY;
+    return state.difficulty;
   }
 
   /**
@@ -407,8 +463,12 @@
     keepMovingAcross,
     serve,
     resetMatch,
+    DIFFICULTY,
+    DEFAULT_DIFFICULTY,
+    difficultyOf,
     trackTowards,
     updateAI,
+    setDifficulty,
     updatePlayer,
     isRunning,
     setPaused,
