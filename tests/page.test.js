@@ -187,6 +187,13 @@ test('frames still draw once the match is over', () => {
 
 /* ------------------------------------------------------------ the input -- */
 
+/** Where the ball was on the last frame that drew it. */
+function ballX(page) {
+  const arcs = page.drawn.filter(([key]) => key === 'arc');
+  assert.ok(arcs.length > 0, 'the ball was never drawn');
+  return arcs[arcs.length - 1][1][0];
+}
+
 /** Where the player's paddle was on the last frame that drew it. */
 function playerPaddleY(page) {
   const fills = page.drawn.filter(
@@ -259,6 +266,84 @@ test('time spent away is not played out on the first frame back', () => {
   const before = ballAfter();
   page.gap(30_000, 1);
   assert.equal(ballAfter(), before, 'the ball moved on the frame that came back');
+});
+
+/* ------------------------------------------------------------- the pause -- */
+
+test('P pauses the game', () => {
+  const page = loadPage().frames(60);
+  const before = ballX(page);
+  page.fire('keydown', press('p'));
+  page.frames(60);
+  assert.equal(ballX(page), before, 'the ball kept moving while paused');
+});
+
+test('Escape pauses it too', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('Escape'));
+  const before = ballX(page);
+  page.frames(60);
+  assert.equal(ballX(page), before);
+});
+
+test('P again carries on', () => {
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(10);
+  page.fire('keydown', press('p'));
+  const before = ballX(page);
+  page.frames(60);
+  assert.notEqual(ballX(page), before, 'the ball stayed frozen after resuming');
+});
+
+test('an arrow key resumes, so the way out is the same motion as playing', () => {
+  // Having to find the pause key again before you can move is a worse
+  // interruption than the one being resumed from.
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  page.frames(10);
+  page.fire('keydown', press('ArrowUp'));
+  const before = ballX(page);
+  page.frames(60);
+  assert.notEqual(ballX(page), before);
+});
+
+test('a paused game still draws', () => {
+  // The overlay is a drawing. Freezing the loop as well as the simulation
+  // would leave whatever was on the canvas when the pause landed.
+  const page = loadPage().frames(60);
+  page.fire('keydown', press('p'));
+  const before = page.drawn.length;
+  page.frames(10);
+  assert.ok(page.drawn.length > before, 'nothing was drawn while paused');
+});
+
+test('losing the window pauses rather than playing on without you', () => {
+  const page = loadPage().frames(60);
+  page.fire('window:blur', {});
+  const before = ballX(page);
+  page.frames(120);
+  assert.equal(ballX(page), before, 'the rally continued after the tab lost focus');
+});
+
+test('coming back does not resume on its own', () => {
+  // A ball already in flight when you look again is how a point is lost to a
+  // tab switch.
+  const page = loadPage().frames(60);
+  page.fire('window:blur', {});
+  page.frames(10);
+  const before = ballX(page);
+  page.frames(120);
+  assert.equal(ballX(page), before);
+});
+
+test('a finished match cannot be paused', () => {
+  const page = loadPage().frames(20_000);
+  page.fire('keydown', press('p'));
+  page.frames(2);
+  const drawn = page.drawn.filter(([key]) => key === 'fillText').map(([, args]) => args[0]);
+  assert.ok(drawn.some((t) => /WIN|GAME OVER/.test(t)), drawn.join(' | '));
+  assert.ok(!drawn.includes('PAUSED'), 'the pause overlay was drawn over the result');
 });
 
 /* ------------------------------------------------------------- the touch -- */

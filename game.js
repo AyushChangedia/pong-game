@@ -16,6 +16,9 @@ const {
   resetMatch,
   updateAI,
   updatePlayer,
+  isRunning,
+  setPaused,
+  togglePause,
   planSteps,
   stepBall,
   winner,
@@ -41,6 +44,19 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     resetMatch(state);
     return;
+  }
+
+  if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+    e.preventDefault();
+    togglePause(state);
+    return;
+  }
+
+  // Any arrow press resumes, so the way out of a pause is the same motion as
+  // playing. Having to find the pause key again to start moving is a worse
+  // interruption than the one being resumed from.
+  if (state.paused && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    setPaused(state, false);
   }
 
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -146,6 +162,24 @@ function drawResult(who) {
   ctx.fillText('Press Space to play again', canvas.width / 2, canvas.height / 2 + 50);
 }
 
+function drawPaused() {
+  // Lighter than the result overlay: the board underneath is still the thing
+  // being looked at, and a rally frozen mid-flight is worth seeing.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 40px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
+  ctx.font = '18px Arial';
+  ctx.fillStyle = '#00ff88';
+  ctx.fillText(
+    'Press P, Escape or an arrow key to carry on',
+    canvas.width / 2,
+    canvas.height / 2 + 40,
+  );
+}
+
 function draw() {
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -160,6 +194,7 @@ function draw() {
 
   const result = winner(state);
   if (result) drawResult(result);
+  else if (state.paused) drawPaused();
 }
 
 /* ----------------------------------------------------------------- loop -- */
@@ -187,6 +222,10 @@ function standDown() {
   input.down = false;
   lastFrame = null;
   carry = 0;
+  // Losing the window mid-rally is exactly the situation pausing exists for.
+  // Resuming is deliberately not automatic: coming back to a ball already in
+  // flight is how you lose a point to a tab switch.
+  setPaused(state, true);
 }
 
 document.addEventListener('visibilitychange', standDown);
@@ -198,7 +237,7 @@ function gameLoop(now) {
   const elapsed = lastFrame === null ? 0 : now - lastFrame;
   lastFrame = now;
 
-  if (!state.gameOver) {
+  if (isRunning(state)) {
     const plan = planSteps(elapsed, carry);
     carry = plan.carry;
     for (let i = 0; i < plan.steps; i += 1) {
