@@ -136,3 +136,74 @@ test('a full match ends at the winning score and no further', () => {
   assert.equal(state.gameOver, true, 'no match completed in 20000 steps');
   assert.equal(Math.max(state.score.player, state.score.computer), E.RULES.winScore);
 });
+
+/* ------------------------------------------------------- who receives -- */
+
+test('the side that conceded receives the next serve', () => {
+  // As every racket sport does it, and for the reason they do: losing three
+  // points in a row should not also mean watching three serves fly away.
+  const state = E.createState();
+  state.ball.x = state.field.width + state.ball.size + 1;
+  state.ball.dx = 5;
+
+  const scorer = E.stepBall(state, fixed(0.9));
+
+  // The player scored, so the computer conceded — and the computer is on the
+  // right, so the ball travels right, towards it.
+  assert.equal(scorer, 'player');
+  assert.ok(state.ball.dx > 0, `the ball went back to the scorer: dx ${state.ball.dx}`);
+});
+
+test('and the other way round', () => {
+  const state = E.createState();
+  state.ball.x = -state.ball.size - 1;
+  state.ball.dx = -5;
+
+  const scorer = E.stepBall(state, fixed(0.1));
+
+  assert.equal(scorer, 'computer');
+  assert.ok(state.ball.dx < 0, `the ball went back to the scorer: dx ${state.ball.dx}`);
+});
+
+test('the receiver beats the coin flip', () => {
+  // The direction must not depend on the random draw at all once somebody has
+  // conceded, or the fairness is only two-thirds of the time.
+  for (const draw of [0, 0.1, 0.5, 0.51, 0.9, 0.999]) {
+    const state = E.createState();
+    state.ball.x = state.field.width + state.ball.size + 1;
+    state.ball.dx = 5;
+    E.stepBall(state, fixed(draw));
+    assert.ok(state.ball.dx > 0, `a draw of ${draw} sent the ball the wrong way`);
+  }
+});
+
+test('the opening serve is still a coin flip', () => {
+  // Nobody has conceded anything yet, so neither side is owed the ball.
+  const left = E.createState();
+  E.serve(left, fixed(0.2));
+  assert.ok(left.ball.dx < 0);
+
+  const right = E.createState();
+  E.serve(right, fixed(0.8));
+  assert.ok(right.ball.dx > 0);
+});
+
+test('a serve to a named side always has real horizontal speed', () => {
+  for (const towards of ['player', 'computer']) {
+    const state = E.createState();
+    E.serve(state, fixed(0.5), towards);
+    assert.equal(Math.abs(state.ball.dx), E.RULES.serveSpeed, `serving to ${towards}`);
+  }
+});
+
+test('the final point does not serve again, whoever conceded', () => {
+  const state = E.createState();
+  state.score.player = E.RULES.winScore - 1;
+  state.ball.x = state.field.width + state.ball.size + 1;
+  state.ball.dx = 5;
+
+  E.stepBall(state, fixed(0.5));
+
+  assert.equal(state.gameOver, true);
+  assert.ok(state.ball.x > state.field.width, 'the ball was re-centred after match point');
+});

@@ -179,12 +179,25 @@
   }
 
   /** Put the ball back in the middle, served towards a random side. */
-  function serve(state, random = Math.random) {
+  /**
+   * Put the ball back in the middle and send it off again.
+   *
+   * @param {'player'|'computer'|null} [towards] who to serve at. The side that
+   *   just conceded gets the ball, which is how every racket sport does it and
+   *   what keeps a run of points from compounding: losing three in a row
+   *   should not also mean watching three serves fly away from you. With
+   *   nobody named — the opening serve — the coin decides.
+   */
+  function serve(state, random = Math.random, towards = null) {
     const ball = state.ball;
     state.rally = 0;
     ball.x = state.field.width / 2;
     ball.y = state.field.height / 2;
-    ball.dx = (random() > 0.5 ? 1 : -1) * RULES.serveSpeed;
+
+    const direction =
+      towards === 'player' ? -1 : towards === 'computer' ? 1 : random() > 0.5 ? 1 : -1;
+
+    ball.dx = direction * RULES.serveSpeed;
     ball.dy = (random() - 0.5) * RULES.serveSpeed;
     return state;
   }
@@ -313,7 +326,9 @@
     if (scorer) {
       state.score[scorer] += 1;
       if (state.score[scorer] >= RULES.winScore) state.gameOver = true;
-      else serve(state, random);
+      // The one who conceded receives. `scorer` is who won the point, so the
+      // ball goes to the other side.
+      else serve(state, random, scorer === 'player' ? 'computer' : 'player');
     }
 
     return scorer;
